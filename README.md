@@ -1,25 +1,27 @@
 # GreyNOC DMZ
 
-GreyNOC DMZ is a safe, branded Detection Management Zone for validating GreyNOC red, blue, and purple team workflows in an isolated lab.
+GreyNOC DMZ is an isolated lab for testing detection logic, telemetry handling, alert review, and purple-team validation.
 
-It is built for defensive testing, detection engineering, operator training, and repeatable evidence collection. The starter repo uses synthetic telemetry and harmless local services so detections can be tested without touching production systems, customer data, or public targets.
+The goal is simple: replay known activity, verify the expected detections, collect evidence, and improve the rule or workflow when something misses.
 
-## Tagline
+## Status
 
-Break safely. Detect clearly. Improve continuously.
+Starter scaffold. Not production software yet.
 
-## What this repo includes
+## What this repo is for
 
-- Safe cyber-range starter layout
-- Docker Compose lab network
-- GreyNOC-branded dashboard stub
-- Synthetic telemetry fixtures
-- Detection rules in JSON
-- Scenario definitions mapped to MITRE ATT&CK-style tactics
-- Detection validation runner
-- Evidence and report generation
-- Red, blue, and purple team workflow docs
-- Safety boundaries for public/demo use
+- Testing detection rules against synthetic telemetry
+- Running repeatable red, blue, and purple team scenarios
+- Training SOC workflows without using customer data
+- Checking that alerts include enough context for triage
+- Producing simple evidence bundles and validation reports
+
+## What this repo is not for
+
+- Testing against public targets
+- Storing real credentials, customer logs, or sensitive data
+- Running malware, persistence, evasion, or destructive actions
+- Replacing a production SIEM, EDR, or case-management platform
 
 ## Quick start
 
@@ -34,52 +36,49 @@ greynoc-dmz validate-all
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
 ```
 
-Or run with Docker Compose:
+Or run the local lab:
 
 ```bash
 docker compose up --build
 ```
 
-Then open:
+Open the dashboard:
 
 ```text
 http://127.0.0.1:8787
 ```
 
-## Repo layout
+## Planned layout
 
 ```text
-apps/dashboard/              GreyNOC DMZ browser dashboard
-configs/                     Lab configuration
-detections/                  Detection rules
-  rules/                     JSON detection rules
-docs/                        Red/blue/purple guides and safety docs
+apps/dashboard/              Web dashboard
+configs/                     Lab settings
+detections/rules/            Detection rules
+docs/                        Design notes and team workflow guides
 evidence/                    Generated evidence bundles, ignored by git
 infra/local-lab/             Docker Compose lab services
 reports/                     Generated reports, ignored by git
-runbooks/                    Operator response runbooks
+runbooks/                    Triage and response notes
 scenarios/                   Repeatable validation scenarios
-src/greynoc_dmz/             Python CLI, engine, dashboard, reports
+src/greynoc_dmz/             CLI, detection engine, reports, dashboard server
 telemetry/fixtures/          Synthetic logs and events
-tests/                       Unit tests
+tests/                       Unit and regression tests
 ```
 
-## Safety model
+## Validation flow
 
-GreyNOC DMZ is for owned, approved, or fully synthetic environments only.
-
-This starter repo does not include exploitation code, credential attacks, malware, bypasses, persistence, evasion, destructive actions, or instructions for targeting third-party systems. Red-team simulations are represented as synthetic logs/events and benign local requests designed to validate detections.
-
-## Core workflow
-
-1. Choose a scenario.
-2. Replay synthetic telemetry.
-3. Run detections.
-4. Confirm expected alerts fired.
-5. Collect evidence.
+1. Select a scenario.
+2. Replay the fixture telemetry.
+3. Run the matching detections.
+4. Compare expected alerts with actual alerts.
+5. Save evidence.
 6. Generate a report.
-7. Tune rules and retest.
+7. Tune and retest.
 
-## GitHub
+## Safety rules
 
-Repository: https://github.com/GreyNOC/DMZ
+Keep the lab isolated. Use owned systems or synthetic data only. Do not add real secrets, client data, production logs, or offensive tooling that can be used outside the lab.
+
+## Repository
+
+https://github.com/GreyNOC/DMZ
