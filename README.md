@@ -2,11 +2,11 @@
 
 GreyNOC DMZ is an isolated lab for validating detection rules and SOC workflows with synthetic telemetry.
 
-The app replays known events, runs detection rules, compares expected alerts with actual alerts, and writes evidence and reports. It is built for local testing, operator training, and purple-team regression work.
+The app replays known events, runs detection rules, compares expected alerts with actual alerts, and writes evidence, history, and reports. It is built for local testing, operator training, and purple-team regression work.
 
 ## Status
 
-Production-oriented scaffold. The core CLI, rule engine, reports, tests, Docker build, and CI workflow are included. Treat integrations with real SIEM, EDR, ticketing, or cloud systems as future work.
+Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, API status endpoint, tests, Docker build, and CI workflow are included. Integrations with real SIEM, EDR, ticketing, or cloud systems are future work.
 
 ## What this repo is for
 
@@ -14,7 +14,8 @@ Production-oriented scaffold. The core CLI, rule engine, reports, tests, Docker 
 - Running repeatable red, blue, and purple team scenarios
 - Training SOC workflows without customer data
 - Checking that alerts include enough context for triage
-- Producing evidence bundles and validation reports
+- Producing evidence bundles, history records, and validation reports
+- Reviewing validation status in a clean system-manager style dashboard
 
 ## What this repo is not for
 
@@ -30,6 +31,7 @@ python -m venv .venv
 . .venv/bin/activate  # Windows: .venv\Scripts\activate
 python -m pip install -e '.[dev]'
 
+greynoc-dmz security-check
 greynoc-dmz validate-all
 
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
@@ -39,6 +41,12 @@ Open the dashboard:
 
 ```text
 http://127.0.0.1:8787
+```
+
+Check API status:
+
+```text
+http://127.0.0.1:8787/api/status
 ```
 
 Run one scenario:
@@ -64,10 +72,12 @@ infra/local-lab/             Local lab notes
 reports/                     Generated reports, ignored by git
 runbooks/                    Triage notes for starter detections
 scenarios/                   Repeatable validation scenarios
-src/greynoc_dmz/             CLI, rule engine, dashboard, reports
+src/greynoc_dmz/             CLI, rule engine, dashboard, reports, security checks
 telemetry/fixtures/          Synthetic telemetry
 tests/                       Unit and regression tests
 ```
+
+Generated local history is written under `.dmz/` and ignored by git.
 
 ## Validation flow
 
@@ -76,8 +86,32 @@ tests/                       Unit and regression tests
 3. Run the detection rules.
 4. Compare expected alerts with actual alerts.
 5. Save evidence.
-6. Generate a report.
-7. Tune and retest.
+6. Save a local history record.
+7. Generate a report.
+8. Tune and retest.
+
+## Dashboard
+
+The dashboard uses a clean old-Windows/system-manager style. It shows:
+
+- scenario count
+- passing and failing totals
+- alert count
+- fired, missing, and unexpected rules
+- recent validation history
+
+The dashboard is local-first. It serves static HTML and a small JSON status endpoint. It also sets basic browser security headers.
+
+## Role model
+
+The first role model is code-only. It defines these roles:
+
+- `viewer`
+- `analyst`
+- `engineer`
+- `admin`
+
+The current app does not yet enforce login or remote authentication. The role model exists so future API and UI work can use one permission map instead of scattered checks.
 
 ## Rule format
 
@@ -98,12 +132,26 @@ Rules are JSON files under `detections/rules/`.
 }
 ```
 
-## Development checks
+Threshold rules are window-aware. A rule with `threshold: 5` and `window_minutes: 10` only fires when five matching events occur inside the configured window.
+
+## Security checks
+
+Run this before each commit:
+
+```bash
+greynoc-dmz security-check
+```
+
+The scanner checks for common secret and risky shell-download markers in repository text files. It is not a full secret scanner, but it catches basic mistakes early.
+
+CI runs:
 
 ```bash
 ruff check .
 mypy src
 pytest
+greynoc-dmz security-check
+greynoc-dmz validate-all
 ```
 
 ## Safety rules
