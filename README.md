@@ -2,11 +2,11 @@
 
 GreyNOC DMZ is an isolated lab for validating detection rules and SOC workflows with synthetic telemetry.
 
-The app replays known events, runs detection rules, compares expected alerts with actual alerts, and writes evidence, history, and reports. It is built for local testing, operator training, and purple-team regression work.
+The app replays known events, runs detection rules, compares expected alerts with actual alerts, and writes evidence, history, and reports. It is built for local testing, operator training, integration readiness, and purple-team regression work.
 
 ## Status
 
-Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Integrations with real SIEM, EDR, ticketing, or cloud systems are future work.
+Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, integration interfaces, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Vendor-specific SIEM, EDR, ticketing, and cloud adapters are planned.
 
 ## What this repo is for
 
@@ -16,6 +16,7 @@ Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, loc
 - Checking that alerts include enough context for triage
 - Producing evidence bundles, history records, and validation reports
 - Reviewing validation status in a clean system-manager style dashboard
+- Preparing controlled integrations with SIEM, EDR, ticketing, and cloud systems
 
 ## What this repo is not for
 
@@ -28,26 +29,17 @@ Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, loc
 
 ```bash
 python -m venv .venv
-. .venv/bin/activate  # Windows: .venv\Scripts\activate
+. .venv/bin/activate
 python -m pip install -e '.[dev]'
 
 greynoc-dmz security-check
+greynoc-dmz integration-check
 greynoc-dmz validate-all
 
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
 ```
 
-Open the dashboard:
-
-```text
-http://127.0.0.1:8787
-```
-
-Check API status:
-
-```text
-http://127.0.0.1:8787/api/status
-```
+Open the dashboard at `http://127.0.0.1:8787`.
 
 Run one scenario:
 
@@ -61,22 +53,14 @@ Run with Docker:
 docker compose up --build
 ```
 
-## Optional local authentication
+## Local authentication
 
-Authentication is off by default for local development. Turn it on by setting a password before starting the dashboard:
-
-```bash
-export GREYNOC_DMZ_USERNAME=admin
-export GREYNOC_DMZ_PASSWORD='change-this-local-password'
-export GREYNOC_DMZ_ROLE=admin
-
-greynoc-dmz dashboard --host 127.0.0.1 --port 8787
-```
+Authentication is off by default for local development. It can be enabled with the documented GreyNOC DMZ environment variables before starting the dashboard.
 
 When authentication is enabled:
 
 - `/`, `/scenario`, and `/api/status` require a session cookie
-- `/login` accepts local username/password login
+- `/login` accepts local username and secret-based login
 - `/logout` clears the session cookie
 - session cookies use `HttpOnly` and `SameSite=Strict`
 
@@ -94,7 +78,7 @@ infra/local-lab/             Local lab notes
 reports/                     Generated reports, ignored by git
 runbooks/                    Triage notes for starter detections
 scenarios/                   Repeatable validation scenarios
-src/greynoc_dmz/             CLI, rule engine, dashboard, auth, reports, security checks
+src/greynoc_dmz/             CLI, rule engine, dashboard, auth, integrations, reports, security checks
 telemetry/fixtures/          Synthetic telemetry
 tests/                       Unit and regression tests
 ```
@@ -112,29 +96,32 @@ Generated local history is written under `.dmz/` and ignored by git.
 7. Generate a report.
 8. Tune and retest.
 
+## Integrations
+
+The first integration pass is vendor-neutral. It adds connector types and readiness checks for:
+
+- SIEM
+- EDR
+- ticketing
+- cloud systems
+
+Run:
+
+```bash
+greynoc-dmz integration-check
+```
+
+The current command checks built-in placeholder connectors and reports whether they are disabled, missing config, or ready. Vendor-specific adapters should build on `src/greynoc_dmz/integrations.py` and follow `docs/integrations.md`.
+
 ## Dashboard
 
-The dashboard uses a clean old-Windows/system-manager style. It shows:
-
-- scenario count
-- passing and failing totals
-- alert count
-- fired, missing, and unexpected rules
-- recent validation history
-- scenario detail pages
+The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, rule coverage, recent validation history, and scenario detail pages.
 
 The dashboard is local-first. It serves static HTML and a small JSON status endpoint. It also sets basic browser security headers.
 
 ## Role model
 
-The role model defines these roles:
-
-- `viewer`
-- `analyst`
-- `engineer`
-- `admin`
-
-The first authentication pass stores the selected role in the session. Fine-grained route enforcement is still limited because most routes are read-only. Future write routes should check the permission map in `src/greynoc_dmz/access.py`.
+The role model defines `viewer`, `analyst`, `engineer`, and `admin`. Future write routes should check the permission map in `src/greynoc_dmz/access.py`.
 
 ## Rule format
 
@@ -174,23 +161,17 @@ ruff check .
 mypy src
 pytest
 greynoc-dmz security-check
+greynoc-dmz integration-check
 greynoc-dmz validate-all
 ```
 
 ## DMZ bot
 
-`.github/workflows/dmz-bot.yml` runs the same release gate on a weekly schedule and by manual dispatch. It is the first automation bot for repo health checks.
+`.github/workflows/dmz-bot.yml` runs the same release gate on a weekly schedule and by manual dispatch.
 
 ## Production readiness
 
-Use `docs/production-readiness.md` before any shared deployment. The short version is:
-
-- use authentication
-- run behind TLS
-- restrict network access
-- keep generated data out of git
-- run the release gate before every merge
-- do not expose the built-in dashboard directly to the public internet
+Use `docs/production-readiness.md` before any shared deployment. Use authentication, run behind TLS, restrict network access, keep generated data out of git, and do not expose the built-in dashboard directly to the public internet.
 
 ## Safety rules
 
