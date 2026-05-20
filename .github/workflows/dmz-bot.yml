@@ -25,5 +25,7 @@ jobs:
         run: pytest
       - name: Security check
         run: greynoc-dmz security-check
+      - name: Integration readiness
+        run: greynoc-dmz integration-check
       - name: Scenario validation
         run: greynoc-dmz validate-all
