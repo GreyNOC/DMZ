@@ -19,4 +19,5 @@ jobs:
       - run: mypy src
       - run: pytest
       - run: greynoc-dmz security-check
+      - run: greynoc-dmz integration-check
       - run: greynoc-dmz validate-all
