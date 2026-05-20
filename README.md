@@ -6,7 +6,7 @@ The app replays known events, runs detection rules, compares expected alerts wit
 
 ## Status
 
-Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, API status endpoint, tests, Docker build, and CI workflow are included. Integrations with real SIEM, EDR, ticketing, or cloud systems are future work.
+Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, tests, Docker build, and CI workflow are included. Integrations with real SIEM, EDR, ticketing, or cloud systems are future work.
 
 ## What this repo is for
 
@@ -61,6 +61,27 @@ Run with Docker:
 docker compose up --build
 ```
 
+## Optional local authentication
+
+Authentication is off by default for local development. Turn it on by setting a password before starting the dashboard:
+
+```bash
+export GREYNOC_DMZ_USERNAME=admin
+export GREYNOC_DMZ_PASSWORD='change-this-local-password'
+export GREYNOC_DMZ_ROLE=admin
+
+greynoc-dmz dashboard --host 127.0.0.1 --port 8787
+```
+
+When authentication is enabled:
+
+- `/`, `/scenario`, and `/api/status` require a session cookie
+- `/login` accepts local username/password login
+- `/logout` clears the session cookie
+- session cookies use `HttpOnly` and `SameSite=Strict`
+
+Do not expose this dashboard directly to the internet. Put a real reverse proxy, TLS, and identity provider in front of it before any shared or remote use.
+
 ## Layout
 
 ```text
@@ -72,7 +93,7 @@ infra/local-lab/             Local lab notes
 reports/                     Generated reports, ignored by git
 runbooks/                    Triage notes for starter detections
 scenarios/                   Repeatable validation scenarios
-src/greynoc_dmz/             CLI, rule engine, dashboard, reports, security checks
+src/greynoc_dmz/             CLI, rule engine, dashboard, auth, reports, security checks
 telemetry/fixtures/          Synthetic telemetry
 tests/                       Unit and regression tests
 ```
@@ -99,19 +120,20 @@ The dashboard uses a clean old-Windows/system-manager style. It shows:
 - alert count
 - fired, missing, and unexpected rules
 - recent validation history
+- scenario detail pages
 
 The dashboard is local-first. It serves static HTML and a small JSON status endpoint. It also sets basic browser security headers.
 
 ## Role model
 
-The first role model is code-only. It defines these roles:
+The role model defines these roles:
 
 - `viewer`
 - `analyst`
 - `engineer`
 - `admin`
 
-The current app does not yet enforce login or remote authentication. The role model exists so future API and UI work can use one permission map instead of scattered checks.
+The first authentication pass stores the selected role in the session. Fine-grained route enforcement is still limited because most routes are read-only. Future write routes should check the permission map in `src/greynoc_dmz/access.py`.
 
 ## Rule format
 
