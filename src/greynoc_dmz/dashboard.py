@@ -4,8 +4,17 @@ import html
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
+from .auth import (
+    AuthConfig,
+    SessionStore,
+    build_clear_cookie,
+    build_session_cookie,
+    load_auth_config,
+    parse_cookie,
+    verify_login,
+)
 from .engine import validate_all
 from .models import ScenarioResult
 from .store import read_history
@@ -13,16 +22,39 @@ from .store import read_history
 
 class DashboardHandler(BaseHTTPRequestHandler):
     root = Path.cwd()
+    auth_config: AuthConfig = load_auth_config()
+    sessions = SessionStore()
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/login":
+            self._send_html(render_login(None), status=200)
+            return
+        if parsed.path == "/logout":
+            token = parse_cookie(self.headers.get("Cookie"))
+            self.sessions.delete(token)
+            self._redirect("/login", clear_cookie=True)
+            return
+        if not self._is_authorized():
+            self._redirect("/login")
+            return
         if parsed.path in {"/", "/index.html"}:
-            self._send_html(render_dashboard(validate_all(self.root), read_history(self.root / ".dmz")))
+            self._send_html(render_dashboard(validate_all(self.root), read_history(self.root / ".dmz"), self.auth_config.enabled))
+            return
+        if parsed.path == "/scenario":
+            scenario_id = parse_qs(parsed.query).get("id", [""])[0]
+            results = validate_all(self.root)
+            result = next((item for item in results if item.scenario_id == scenario_id), None)
+            if result is None:
+                self.send_error(404)
+                return
+            self._send_html(render_scenario_detail(result, self.auth_config.enabled))
             return
         if parsed.path == "/api/status":
             results = validate_all(self.root)
             payload = {
                 "app": "GreyNOC DMZ",
+                "auth_enabled": self.auth_config.enabled,
                 "scenario_count": len(results),
                 "passing": sum(1 for item in results if item.passed),
                 "failing": sum(1 for item in results if not item.passed),
@@ -32,13 +64,46 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
-    def _send_html(self, body: str) -> None:
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path != "/login":
+            self.send_error(404)
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8")
+        params = parse_qs(body)
+        username = params.get("username", [""])[0]
+        password = params.get("password", [""])[0]
+        if verify_login(self.auth_config, username, password):
+            session = self.sessions.create(username or self.auth_config.username, self.auth_config.role)
+            secure = self.headers.get("X-Forwarded-Proto") == "https"
+            self._redirect("/", cookie=build_session_cookie(session, secure=secure))
+            return
+        self._send_html(render_login("Invalid username or password."), status=401)
+
+    def _is_authorized(self) -> bool:
+        if not self.auth_config.enabled:
+            return True
+        token = parse_cookie(self.headers.get("Cookie"))
+        return self.sessions.get(token) is not None
+
+    def _redirect(self, location: str, cookie: str | None = None, clear_cookie: bool = False) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        if clear_cookie:
+            self.send_header("Set-Cookie", build_clear_cookie())
+        self.end_headers()
+
+    def _send_html(self, body: str, status: int = 200) -> None:
         payload = body.encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
@@ -57,7 +122,77 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return
 
 
-def render_dashboard(results: list[ScenarioResult], history: list[dict[str, object]]) -> str:
+def _page(title: str, body: str) -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(title)}</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; font-family: Tahoma, Verdana, Arial, sans-serif; font-size: 13px; background: #3a6ea5; color: #111; }}
+    a {{ color: #000080; }}
+    .desktop {{ padding: 14px; min-height: 100vh; }}
+    .window {{ max-width: 1180px; margin: 0 auto; border: 2px solid #0a246a; background: #d4d0c8; box-shadow: 3px 3px 0 #1b1b1b; }}
+    .titlebar {{ display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; color: white; background: linear-gradient(90deg, #0a246a, #a6caf0); font-weight: bold; }}
+    .controls span {{ display: inline-block; min-width: 18px; padding: 0 4px; margin-left: 3px; text-align: center; border: 1px solid #333; background: #d4d0c8; color: #111; }}
+    .menu {{ padding: 4px 8px; border-bottom: 1px solid #808080; }}
+    .menu span, .menu a {{ margin-right: 18px; color: #111; text-decoration: none; }}
+    .content {{ padding: 10px; }}
+    .panel {{ border: 2px inset #fff; background: #f0f0f0; margin-bottom: 10px; padding: 10px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }}
+    .metric {{ border: 1px solid #808080; background: white; padding: 8px; min-height: 58px; }}
+    .metric b {{ display: block; font-size: 20px; margin-top: 4px; }}
+    table {{ width: 100%; border-collapse: collapse; background: white; }}
+    th, td {{ text-align: left; padding: 6px; border: 1px solid #b5b5b5; vertical-align: top; }}
+    th {{ background: #d4d0c8; }}
+    .status {{ display: inline-block; min-width: 46px; text-align: center; padding: 2px 5px; border: 1px solid #444; background: white; }}
+    .status.pass {{ color: #0b5f17; }}
+    .status.fail {{ color: #8a0000; }}
+    .footer {{ padding: 4px 8px; border-top: 1px solid #808080; font-size: 12px; }}
+    code, pre {{ font-family: Consolas, monospace; }}
+    input {{ width: 100%; padding: 5px; border: 2px inset #fff; background: white; }}
+    button {{ padding: 4px 12px; border: 2px outset #fff; background: #d4d0c8; }}
+    .form {{ max-width: 360px; }}
+    .error {{ color: #8a0000; }}
+    @media (max-width: 800px) {{ .grid {{ grid-template-columns: 1fr 1fr; }} }}
+  </style>
+</head>
+<body>
+  <div class="desktop">
+    <div class="window">
+      <div class="titlebar"><span>{html.escape(title)}</span><span class="controls"><span>_</span><span>[]</span><span>X</span></span></div>
+      <div class="menu"><a href="/">Scenarios</a><a href="/api/status">API</a><a href="/logout">Logout</a></div>
+      <div class="content">{body}</div>
+      <div class="footer">GreyNOC DMZ local detection manager</div>
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+
+def render_login(error: str | None) -> str:
+    error_html = f"<p class='error'>{html.escape(error)}</p>" if error else ""
+    return _page(
+        "GreyNOC DMZ - Login",
+        f"""
+        <div class="panel form">
+          <h3>Login</h3>
+          {error_html}
+          <form method="post" action="/login">
+            <p><label>Username<br><input name="username" autocomplete="username"></label></p>
+            <p><label>Password<br><input name="password" type="password" autocomplete="current-password"></label></p>
+            <p><button type="submit">Login</button></p>
+          </form>
+          <p>Authentication is enabled when <code>GREYNOC_DMZ_PASSWORD</code> is set.</p>
+        </div>
+        """,
+    )
+
+
+def render_dashboard(results: list[ScenarioResult], history: list[dict[str, object]], auth_enabled: bool) -> str:
     rows = []
     passed = 0
     total = 0
@@ -69,7 +204,7 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
         status = "PASS" if item.passed else "FAIL"
         rows.append(
             "<tr>"
-            f"<td>{html.escape(item.scenario_id)}</td>"
+            f"<td><a href='/scenario?id={html.escape(item.scenario_id)}'>{html.escape(item.scenario_id)}</a></td>"
             f"<td>{html.escape(item.scenario_name)}</td>"
             f"<td><span class='status {status.lower()}'>{status}</span></td>"
             f"<td>{html.escape(', '.join(item.fired_rules) or 'none')}</td>"
@@ -92,43 +227,8 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
             "</tr>"
         )
 
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GreyNOC DMZ</title>
-  <style>
-    * {{ box-sizing: border-box; }}
-    body {{ margin: 0; font-family: Tahoma, Verdana, Arial, sans-serif; font-size: 13px; background: #3a6ea5; color: #111; }}
-    .desktop {{ padding: 14px; min-height: 100vh; }}
-    .window {{ max-width: 1180px; margin: 0 auto; border: 2px solid #0a246a; background: #d4d0c8; box-shadow: 3px 3px 0 #1b1b1b; }}
-    .titlebar {{ display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; color: white; background: linear-gradient(90deg, #0a246a, #a6caf0); font-weight: bold; }}
-    .controls span {{ display: inline-block; min-width: 18px; padding: 0 4px; margin-left: 3px; text-align: center; border: 1px solid #333; background: #d4d0c8; color: #111; }}
-    .menu {{ padding: 4px 8px; border-bottom: 1px solid #808080; }}
-    .menu span {{ margin-right: 18px; }}
-    .content {{ padding: 10px; }}
-    .panel {{ border: 2px inset #fff; background: #f0f0f0; margin-bottom: 10px; padding: 10px; }}
-    .grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }}
-    .metric {{ border: 1px solid #808080; background: white; padding: 8px; min-height: 58px; }}
-    .metric b {{ display: block; font-size: 20px; margin-top: 4px; }}
-    table {{ width: 100%; border-collapse: collapse; background: white; }}
-    th, td {{ text-align: left; padding: 6px; border: 1px solid #b5b5b5; }}
-    th {{ background: #d4d0c8; }}
-    .status {{ display: inline-block; min-width: 46px; text-align: center; padding: 2px 5px; border: 1px solid #444; background: white; }}
-    .status.pass {{ color: #0b5f17; }}
-    .status.fail {{ color: #8a0000; }}
-    .footer {{ padding: 4px 8px; border-top: 1px solid #808080; font-size: 12px; }}
-    code {{ font-family: Consolas, monospace; }}
-    @media (max-width: 800px) {{ .grid {{ grid-template-columns: 1fr 1fr; }} }}
-  </style>
-</head>
-<body>
-  <div class="desktop">
-    <div class="window">
-      <div class="titlebar"><span>GreyNOC DMZ - Detection Manager</span><span class="controls"><span>_</span><span>[]</span><span>X</span></span></div>
-      <div class="menu"><span>File</span><span>View</span><span>Scenarios</span><span>Reports</span><span>Help</span></div>
-      <div class="content">
+    auth_label = "enabled" if auth_enabled else "disabled"
+    body = f"""
         <div class="panel">
           <div class="grid">
             <div class="metric">Scenarios<b>{total}</b></div>
@@ -151,16 +251,53 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
             <tbody>{''.join(history_rows) or '<tr><td colspan="4">No history yet.</td></tr>'}</tbody>
           </table>
         </div>
+        <div class="panel">Authentication: <code>{auth_label}</code>. Status API: <code>/api/status</code></div>
+    """
+    return _page("GreyNOC DMZ - Detection Manager", body)
+
+
+def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
+    status = "PASS" if result.passed else "FAIL"
+    alert_rows = []
+    for alert in result.alerts:
+        alert_rows.append(
+            "<tr>"
+            f"<td>{html.escape(alert.rule_id)}</td>"
+            f"<td>{html.escape(alert.rule_name)}</td>"
+            f"<td>{html.escape(alert.severity.value)}</td>"
+            f"<td>{html.escape(alert.host)}</td>"
+            f"<td>{html.escape(alert.user or 'n/a')}</td>"
+            f"<td>{alert.event_count}</td>"
+            f"<td>{html.escape(alert.runbook or 'n/a')}</td>"
+            "</tr>"
+        )
+    body = f"""
+      <div class="panel"><a href="/">Back to scenarios</a></div>
+      <div class="panel">
+        <h3>{html.escape(result.scenario_name)}</h3>
+        <table>
+          <tr><th>Scenario ID</th><td>{html.escape(result.scenario_id)}</td></tr>
+          <tr><th>Status</th><td><span class='status {status.lower()}'>{status}</span></td></tr>
+          <tr><th>Expected</th><td>{html.escape(', '.join(result.expected_rules) or 'none')}</td></tr>
+          <tr><th>Fired</th><td>{html.escape(', '.join(result.fired_rules) or 'none')}</td></tr>
+          <tr><th>Missing</th><td>{html.escape(', '.join(result.missing_rules) or 'none')}</td></tr>
+          <tr><th>Unexpected</th><td>{html.escape(', '.join(result.unexpected_rules) or 'none')}</td></tr>
+          <tr><th>Authentication</th><td>{'enabled' if auth_enabled else 'disabled'}</td></tr>
+        </table>
       </div>
-      <div class="footer">Local only by default. API status endpoint: <code>/api/status</code></div>
-    </div>
-  </div>
-</body>
-</html>
-"""
+      <div class="panel">
+        <h3>Alerts</h3>
+        <table>
+          <thead><tr><th>Rule</th><th>Name</th><th>Severity</th><th>Host</th><th>User</th><th>Events</th><th>Runbook</th></tr></thead>
+          <tbody>{''.join(alert_rows) or '<tr><td colspan="7">No alerts fired.</td></tr>'}</tbody>
+        </table>
+      </div>
+    """
+    return _page(f"GreyNOC DMZ - {result.scenario_id}", body)
 
 
 def serve(root: Path, host: str, port: int) -> None:
     DashboardHandler.root = root
+    DashboardHandler.auth_config = load_auth_config()
     server = ThreadingHTTPServer((host, port), DashboardHandler)
     server.serve_forever()
