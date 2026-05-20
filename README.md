@@ -6,7 +6,7 @@ The app replays known events, runs detection rules, compares expected alerts wit
 
 ## Status
 
-Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, tests, Docker build, and CI workflow are included. Integrations with real SIEM, EDR, ticketing, or cloud systems are future work.
+Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Integrations with real SIEM, EDR, ticketing, or cloud systems are future work.
 
 ## What this repo is for
 
@@ -85,9 +85,10 @@ Do not expose this dashboard directly to the internet. Put a real reverse proxy,
 ## Layout
 
 ```text
+.github/workflows/           CI and scheduled DMZ bot workflow
 apps/dashboard/              Dashboard notes and static assets
 detections/rules/            Detection rules
-docs/                        Design notes and operating guides
+docs/                        Design notes, operating guides, readiness checklist
 evidence/                    Generated evidence, ignored by git
 infra/local-lab/             Local lab notes
 reports/                     Generated reports, ignored by git
@@ -175,6 +176,21 @@ pytest
 greynoc-dmz security-check
 greynoc-dmz validate-all
 ```
+
+## DMZ bot
+
+`.github/workflows/dmz-bot.yml` runs the same release gate on a weekly schedule and by manual dispatch. It is the first automation bot for repo health checks.
+
+## Production readiness
+
+Use `docs/production-readiness.md` before any shared deployment. The short version is:
+
+- use authentication
+- run behind TLS
+- restrict network access
+- keep generated data out of git
+- run the release gate before every merge
+- do not expose the built-in dashboard directly to the public internet
 
 ## Safety rules
 
