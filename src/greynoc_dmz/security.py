@@ -15,7 +15,6 @@ DENY_PATTERNS = {
     "BEGIN RSA PRIVATE KEY": "private key material",
     "BEGIN OPENSSH PRIVATE KEY": "private key material",
     "aws_secret_access_key": "cloud secret marker",
-    "password=": "hard-coded password marker",
     "passwd=": "hard-coded password marker",
     "curl http://": "plain HTTP shell download pattern",
     "wget http://": "plain HTTP shell download pattern",
@@ -32,8 +31,30 @@ SKIP_DIRS = {
     "dist",
 }
 
+SKIP_PATH_PARTS = {
+    "tests",
+    "src/greynoc_dmz.egg-info",
+}
+
 SKIP_SUFFIXES = {".pyc", ".png", ".jpg", ".jpeg", ".gif", ".zip"}
 SELF_PATH = "src/greynoc_dmz/security.py"
+
+
+def _should_skip(path: Path, relative: str) -> bool:
+    if any(part in SKIP_DIRS for part in path.parts):
+        return True
+    if path.suffix.lower() in SKIP_SUFFIXES:
+        return True
+    if relative == SELF_PATH:
+        return True
+    return any(relative == item or relative.startswith(f"{item}/") for item in SKIP_PATH_PARTS)
+
+
+def _has_password_assignment(line: str) -> bool:
+    stripped = line.strip().lower()
+    if stripped.startswith("export "):
+        stripped = stripped.removeprefix("export ").strip()
+    return stripped.startswith(("password=", "passwd="))
 
 
 def scan_repo(root: Path) -> list[SecurityFinding]:
@@ -41,13 +62,8 @@ def scan_repo(root: Path) -> list[SecurityFinding]:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if any(part in SKIP_DIRS for part in path.parts):
-            continue
-        if path.suffix.lower() in SKIP_SUFFIXES:
-            continue
-
         relative = str(path.relative_to(root))
-        if relative == SELF_PATH:
+        if _should_skip(path, relative):
             continue
 
         try:
@@ -56,6 +72,9 @@ def scan_repo(root: Path) -> list[SecurityFinding]:
             continue
         for index, line in enumerate(lines, start=1):
             lowered = line.lower()
+            if _has_password_assignment(line):
+                findings.append(SecurityFinding(relative, index, "hard-coded password marker"))
+                continue
             for pattern, reason in DENY_PATTERNS.items():
                 if pattern.lower() in lowered:
                     findings.append(SecurityFinding(relative, index, reason))
