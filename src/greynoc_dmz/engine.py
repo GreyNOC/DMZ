@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 from .io import load_events, load_rules, load_scenario, write_json
 from .models import Alert, DetectionRule, ScenarioResult, TelemetryEvent
+from .store import append_history
 
 
 def _value_matches(actual: Any, expected: Any) -> bool:
@@ -30,6 +32,19 @@ def event_matches_rule(event: TelemetryEvent, rule: DetectionRule) -> bool:
     return True
 
 
+def _threshold_window(events: list[TelemetryEvent], threshold: int, window_minutes: int) -> list[TelemetryEvent] | None:
+    ordered = sorted(events, key=lambda item: item.timestamp)
+    if len(ordered) < threshold:
+        return None
+
+    window = timedelta(minutes=window_minutes)
+    for start in range(0, len(ordered) - threshold + 1):
+        candidate = ordered[start : start + threshold]
+        if candidate[-1].timestamp - candidate[0].timestamp <= window:
+            return candidate
+    return None
+
+
 def run_rules(events: list[TelemetryEvent], rules: list[DetectionRule]) -> list[Alert]:
     alerts: list[Alert] = []
     for rule in rules:
@@ -42,9 +57,9 @@ def run_rules(events: list[TelemetryEvent], rules: list[DetectionRule]) -> list[
             grouped[(event.host, event.user)].append(event)
 
         for (host, user), group in grouped.items():
-            if len(group) < rule.threshold:
+            evidence = _threshold_window(group, rule.threshold, rule.window_minutes)
+            if evidence is None:
                 continue
-            group = sorted(group, key=lambda item: item.timestamp)
             alerts.append(
                 Alert(
                     rule_id=rule.id,
@@ -52,10 +67,10 @@ def run_rules(events: list[TelemetryEvent], rules: list[DetectionRule]) -> list[
                     severity=rule.severity,
                     host=host,
                     user=user,
-                    event_count=len(group),
-                    first_seen=group[0].timestamp,
-                    last_seen=group[-1].timestamp,
-                    evidence=group,
+                    event_count=len(evidence),
+                    first_seen=evidence[0].timestamp,
+                    last_seen=evidence[-1].timestamp,
+                    evidence=evidence,
                     runbook=rule.runbook,
                     mitre=rule.mitre,
                 )
@@ -67,6 +82,7 @@ def run_scenario(
     scenario_path: Path,
     rule_dir: Path,
     evidence_dir: Path | None = None,
+    history_dir: Path | None = None,
 ) -> ScenarioResult:
     scenario = load_scenario(scenario_path)
     rules = load_rules(rule_dir)
@@ -92,6 +108,8 @@ def run_scenario(
 
     if evidence_dir is not None:
         write_json(evidence_dir / f"{scenario.id}.json", result.model_dump(mode="json"))
+    if history_dir is not None:
+        append_history(history_dir, result)
 
     return result
 
@@ -99,6 +117,6 @@ def run_scenario(
 def validate_all(root: Path) -> list[ScenarioResult]:
     scenario_paths = sorted((root / "scenarios").glob("*.json"))
     return [
-        run_scenario(path, root / "detections" / "rules", root / "evidence")
+        run_scenario(path, root / "detections" / "rules", root / "evidence", root / ".dmz")
         for path in scenario_paths
     ]
