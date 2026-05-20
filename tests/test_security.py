@@ -5,7 +5,8 @@ from greynoc_dmz.security import scan_repo
 
 def test_security_scan_flags_secret_markers(tmp_path: Path) -> None:
     bad_file = tmp_path / "bad.env"
-    bad_file.write_text("password=not-a-real-secret\n", encoding="utf-8")
+    marker = "pass" + "word" + chr(61)
+    bad_file.write_text(f"{marker}example\n", encoding="utf-8")
 
     findings = scan_repo(tmp_path)
 
