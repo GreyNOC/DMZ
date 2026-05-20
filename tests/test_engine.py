@@ -1,6 +1,8 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
-from greynoc_dmz.engine import run_scenario, validate_all
+from greynoc_dmz.engine import run_rules, run_scenario, validate_all
+from greynoc_dmz.models import DetectionRule, TelemetryEvent
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,3 +20,37 @@ def test_all_scenarios_pass() -> None:
     results = validate_all(ROOT)
     assert results
     assert all(result.passed for result in results)
+
+
+def test_threshold_respects_window() -> None:
+    rule = DetectionRule(
+        id="GNOC-TEST-001",
+        name="Window test",
+        description="Window regression test",
+        severity="low",
+        data_source="auth",
+        event_type="auth_failed",
+        match={"message": "failed login"},
+        threshold=2,
+        window_minutes=1,
+    )
+    events = [
+        TelemetryEvent(
+            timestamp=datetime(2026, 5, 19, 12, 0, tzinfo=UTC),
+            source="auth",
+            host="range-linux-01",
+            event_type="auth_failed",
+            user="alice",
+            message="failed login",
+        ),
+        TelemetryEvent(
+            timestamp=datetime(2026, 5, 19, 12, 5, tzinfo=UTC),
+            source="auth",
+            host="range-linux-01",
+            event_type="auth_failed",
+            user="alice",
+            message="failed login",
+        ),
+    ]
+
+    assert run_rules(events, [rule]) == []
