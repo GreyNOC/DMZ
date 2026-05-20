@@ -1,45 +1,38 @@
 # GreyNOC DMZ
 
-GreyNOC DMZ is an isolated lab for testing detection logic, telemetry handling, alert review, and purple-team validation.
+GreyNOC DMZ is an isolated lab for validating detection rules and SOC workflows with synthetic telemetry.
 
-The goal is simple: replay known activity, verify the expected detections, collect evidence, and improve the rule or workflow when something misses.
+The app replays known events, runs detection rules, compares expected alerts with actual alerts, and writes evidence and reports. It is built for local testing, operator training, and purple-team regression work.
 
 ## Status
 
-Starter scaffold. Not production software yet.
+Production-oriented scaffold. The core CLI, rule engine, reports, tests, Docker build, and CI workflow are included. Treat integrations with real SIEM, EDR, ticketing, or cloud systems as future work.
 
 ## What this repo is for
 
 - Testing detection rules against synthetic telemetry
 - Running repeatable red, blue, and purple team scenarios
-- Training SOC workflows without using customer data
+- Training SOC workflows without customer data
 - Checking that alerts include enough context for triage
-- Producing simple evidence bundles and validation reports
+- Producing evidence bundles and validation reports
 
 ## What this repo is not for
 
 - Testing against public targets
-- Storing real credentials, customer logs, or sensitive data
+- Storing credentials, customer logs, or sensitive data
 - Running malware, persistence, evasion, or destructive actions
-- Replacing a production SIEM, EDR, or case-management platform
+- Replacing a production SIEM, EDR, or case-management system
 
 ## Quick start
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate  # Windows: .venv\Scripts\activate
-python -m pip install -e .
+python -m pip install -e '.[dev]'
 
-greynoc-dmz run-scenario --scenario scenarios/auth-bruteforce-sim.json
 greynoc-dmz validate-all
 
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
-```
-
-Or run the local lab:
-
-```bash
-docker compose up --build
 ```
 
 Open the dashboard:
@@ -48,20 +41,31 @@ Open the dashboard:
 http://127.0.0.1:8787
 ```
 
-## Planned layout
+Run one scenario:
+
+```bash
+greynoc-dmz run-scenario --scenario scenarios/auth-bruteforce-sim.json
+```
+
+Run with Docker:
+
+```bash
+docker compose up --build
+```
+
+## Layout
 
 ```text
-apps/dashboard/              Web dashboard
-configs/                     Lab settings
+apps/dashboard/              Dashboard notes and static assets
 detections/rules/            Detection rules
-docs/                        Design notes and team workflow guides
-evidence/                    Generated evidence bundles, ignored by git
-infra/local-lab/             Docker Compose lab services
+docs/                        Design notes and operating guides
+evidence/                    Generated evidence, ignored by git
+infra/local-lab/             Local lab notes
 reports/                     Generated reports, ignored by git
-runbooks/                    Triage and response notes
+runbooks/                    Triage notes for starter detections
 scenarios/                   Repeatable validation scenarios
-src/greynoc_dmz/             CLI, detection engine, reports, dashboard server
-telemetry/fixtures/          Synthetic logs and events
+src/greynoc_dmz/             CLI, rule engine, dashboard, reports
+telemetry/fixtures/          Synthetic telemetry
 tests/                       Unit and regression tests
 ```
 
@@ -69,15 +73,42 @@ tests/                       Unit and regression tests
 
 1. Select a scenario.
 2. Replay the fixture telemetry.
-3. Run the matching detections.
+3. Run the detection rules.
 4. Compare expected alerts with actual alerts.
 5. Save evidence.
 6. Generate a report.
 7. Tune and retest.
 
+## Rule format
+
+Rules are JSON files under `detections/rules/`.
+
+```json
+{
+  "id": "GNOC-AUTH-001",
+  "name": "Repeated failed login attempts",
+  "severity": "medium",
+  "data_source": "auth",
+  "event_type": "auth_failed",
+  "match": { "message": "failed login" },
+  "threshold": 5,
+  "window_minutes": 10,
+  "mitre": ["TA0006", "T1110"],
+  "runbook": "runbooks/auth-bruteforce.md"
+}
+```
+
+## Development checks
+
+```bash
+ruff check .
+mypy src
+pytest
+```
+
 ## Safety rules
 
-Keep the lab isolated. Use owned systems or synthetic data only. Do not add real secrets, client data, production logs, or offensive tooling that can be used outside the lab.
+Keep the lab isolated. Use owned systems or synthetic data only. Do not add real secrets, client data, production logs, or tooling that can be used outside the lab.
 
 ## Repository
 

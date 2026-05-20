@@ -1,0 +1,10 @@
+services:
+  dmz:
+    build: .
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./reports:/app/reports
+      - ./evidence:/app/evidence
+    environment:
+      GREYNOC_DMZ_ROOT: /app

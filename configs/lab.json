@@ -1,0 +1,8 @@
+{
+  "name": "GreyNOC DMZ",
+  "environment": "local",
+  "allowed_modes": ["synthetic", "replay"],
+  "deny_public_targets": true,
+  "default_report_dir": "reports",
+  "default_evidence_dir": "evidence"
+}
