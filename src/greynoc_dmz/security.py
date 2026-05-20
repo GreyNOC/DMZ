@@ -33,6 +33,7 @@ SKIP_DIRS = {
 }
 
 SKIP_SUFFIXES = {".pyc", ".png", ".jpg", ".jpeg", ".gif", ".zip"}
+SELF_PATH = "src/greynoc_dmz/security.py"
 
 
 def scan_repo(root: Path) -> list[SecurityFinding]:
@@ -44,11 +45,15 @@ def scan_repo(root: Path) -> list[SecurityFinding]:
             continue
         if path.suffix.lower() in SKIP_SUFFIXES:
             continue
+
+        relative = str(path.relative_to(root))
+        if relative == SELF_PATH:
+            continue
+
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
             continue
-        relative = str(path.relative_to(root))
         for index, line in enumerate(lines, start=1):
             lowered = line.lower()
             for pattern, reason in DENY_PATTERNS.items():
