@@ -10,6 +10,7 @@ from rich.table import Table
 from .dashboard import serve
 from .engine import run_scenario, validate_all
 from .reporting import write_report
+from .security import scan_repo
 
 app = typer.Typer(help="GreyNOC DMZ detection validation CLI")
 console = Console()
@@ -30,6 +31,7 @@ def run_scenario_cmd(
         scenario,
         root / "detections" / "rules",
         root / "evidence" if write_evidence else None,
+        root / ".dmz",
     )
     if write_markdown_report:
         report_path = write_report(result, root / "reports")
@@ -60,6 +62,23 @@ def validate_all_cmd() -> None:
     console.print(table)
     if failed:
         raise typer.Exit(code=1)
+
+
+@app.command("security-check")
+def security_check_cmd() -> None:
+    findings = scan_repo(_root())
+    if not findings:
+        console.print("security-check: PASS")
+        return
+
+    table = Table(title="GreyNOC DMZ Security Findings")
+    table.add_column("File")
+    table.add_column("Line")
+    table.add_column("Reason")
+    for finding in findings:
+        table.add_row(finding.path, str(finding.line), finding.reason)
+    console.print(table)
+    raise typer.Exit(code=1)
 
 
 @app.command("dashboard")
