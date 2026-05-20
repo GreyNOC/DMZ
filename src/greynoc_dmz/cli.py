@@ -9,6 +9,7 @@ from rich.table import Table
 
 from .dashboard import serve
 from .engine import run_scenario, validate_all
+from .integrations import check_integration_config, default_integrations
 from .reporting import write_report
 from .security import scan_repo
 
@@ -62,6 +63,19 @@ def validate_all_cmd() -> None:
     console.print(table)
     if failed:
         raise typer.Exit(code=1)
+
+
+@app.command("integration-check")
+def integration_check_cmd() -> None:
+    table = Table(title="GreyNOC DMZ Integrations")
+    table.add_column("Name")
+    table.add_column("Kind")
+    table.add_column("Status")
+    table.add_column("Detail")
+    for config in default_integrations():
+        check = check_integration_config(config)
+        table.add_row(check.name, check.kind.value, check.status.value, check.detail)
+    console.print(table)
 
 
 @app.command("security-check")
