@@ -6,7 +6,7 @@ The app replays known events, runs detection rules, compares expected alerts wit
 
 ## Status
 
-Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, integration interfaces, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Vendor-specific SIEM, EDR, ticketing, and cloud adapters are planned.
+Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, working outbound integration adapters (file, webhook, Splunk HEC, Jira), tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Inbound telemetry adapters and provider-specific EDR adapters are planned.
 
 ## What this repo is for
 
@@ -35,6 +35,7 @@ python -m pip install -e '.[dev]'
 greynoc-dmz security-check
 greynoc-dmz integration-check
 greynoc-dmz validate-all
+greynoc-dmz integration-publish
 
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
 ```
@@ -98,20 +99,26 @@ Generated local history is written under `.dmz/` and ignored by git.
 
 ## Integrations
 
-The first integration pass is vendor-neutral. It adds connector types and readiness checks for:
+GreyNOC DMZ publishes detection-validation results into existing security
+tooling through small vendor-neutral adapters. Built-in adapters:
 
-- SIEM
-- EDR
-- ticketing
-- cloud systems
+- `file` — local NDJSON feed (no network; safe default)
+- `webhook` — any JSON HTTP endpoint (MSP dashboards, SOAR, EDR/XDR intake)
+- `splunk_hec` — Splunk HTTP Event Collector
+- `jira` — opens a ticket when a scenario fails
 
-Run:
+Integrations are defined in `configs/integrations.json`, which references
+credentials only by environment-variable name and is safe to commit.
 
 ```bash
-greynoc-dmz integration-check
+greynoc-dmz integration-check            # show configured integrations
+greynoc-dmz integration-publish          # dry run: preview what would be sent
+greynoc-dmz integration-publish --send   # transmit to ready integrations
 ```
 
-The current command checks built-in placeholder connectors and reports whether they are disabled, missing config, or ready. Vendor-specific adapters should build on `src/greynoc_dmz/integrations.py` and follow `docs/integrations.md`.
+Integrations are disabled by default. External endpoints are blocked unless
+`GREYNOC_DMZ_ALLOW_EXTERNAL=1` is set or the host is allowlisted. See
+`docs/integrations.md` for adapter details, configuration, and the safety model.
 
 ## Dashboard
 

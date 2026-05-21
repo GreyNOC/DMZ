@@ -16,6 +16,7 @@ from .auth import (
     verify_login,
 )
 from .engine import validate_all
+from .integrations import IntegrationCheck, check_integration_config, load_integrations
 from .models import ScenarioResult
 from .store import read_history
 
@@ -39,7 +40,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._redirect("/login")
             return
         if parsed.path in {"/", "/index.html"}:
-            self._send_html(render_dashboard(validate_all(self.root), read_history(self.root / ".dmz"), self.auth_config.enabled))
+            integration_checks = [
+                check_integration_config(config) for config in load_integrations(self.root)
+            ]
+            self._send_html(
+                render_dashboard(
+                    validate_all(self.root),
+                    read_history(self.root / ".dmz"),
+                    integration_checks,
+                    self.auth_config.enabled,
+                )
+            )
             return
         if parsed.path == "/scenario":
             scenario_id = parse_qs(parsed.query).get("id", [""])[0]
@@ -52,6 +63,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/status":
             results = validate_all(self.root)
+            integration_checks = [
+                check_integration_config(config) for config in load_integrations(self.root)
+            ]
             payload = {
                 "app": "GreyNOC DMZ",
                 "auth_enabled": self.auth_config.enabled,
@@ -59,6 +73,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "passing": sum(1 for item in results if item.passed),
                 "failing": sum(1 for item in results if not item.passed),
                 "results": [item.model_dump(mode="json") for item in results],
+                "integrations": [
+                    {
+                        "name": check.name,
+                        "kind": check.kind.value,
+                        "adapter": check.adapter,
+                        "status": check.status.value,
+                    }
+                    for check in integration_checks
+                ],
             }
             self._send_json(payload)
             return
@@ -192,7 +215,12 @@ def render_login(error: str | None) -> str:
     )
 
 
-def render_dashboard(results: list[ScenarioResult], history: list[dict[str, object]], auth_enabled: bool) -> str:
+def render_dashboard(
+    results: list[ScenarioResult],
+    history: list[dict[str, object]],
+    integration_checks: list[IntegrationCheck],
+    auth_enabled: bool,
+) -> str:
     rows = []
     passed = 0
     total = 0
@@ -227,6 +255,19 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
             "</tr>"
         )
 
+    integration_rows = []
+    for check in integration_checks:
+        integration_rows.append(
+            "<tr>"
+            f"<td>{html.escape(check.name)}</td>"
+            f"<td>{html.escape(check.kind.value)}</td>"
+            f"<td>{html.escape(check.adapter)}</td>"
+            f"<td><span class='status {'pass' if check.status.value == 'ready' else 'fail'}'>"
+            f"{html.escape(check.status.value)}</span></td>"
+            f"<td>{html.escape(check.detail)}</td>"
+            "</tr>"
+        )
+
     auth_label = "enabled" if auth_enabled else "disabled"
     body = f"""
         <div class="panel">
@@ -249,6 +290,13 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
           <table>
             <thead><tr><th>Recorded</th><th>Scenario</th><th>Status</th><th>Alerts</th></tr></thead>
             <tbody>{''.join(history_rows) or '<tr><td colspan="4">No history yet.</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Integrations</h3>
+          <table>
+            <thead><tr><th>Name</th><th>Kind</th><th>Adapter</th><th>Status</th><th>Detail</th></tr></thead>
+            <tbody>{''.join(integration_rows) or '<tr><td colspan="5">No integrations configured.</td></tr>'}</tbody>
           </table>
         </div>
         <div class="panel">Authentication: <code>{auth_label}</code>. Status API: <code>/api/status</code></div>

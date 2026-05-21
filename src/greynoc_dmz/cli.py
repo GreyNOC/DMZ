@@ -9,7 +9,12 @@ from rich.table import Table
 
 from .dashboard import serve
 from .engine import run_scenario, validate_all
-from .integrations import check_integration_config, default_integrations
+from .integrations import (
+    PublishOutcome,
+    check_integration_config,
+    load_integrations,
+    publish_all,
+)
 from .reporting import write_report
 from .security import scan_repo
 
@@ -70,12 +75,53 @@ def integration_check_cmd() -> None:
     table = Table(title="GreyNOC DMZ Integrations")
     table.add_column("Name")
     table.add_column("Kind")
+    table.add_column("Adapter")
     table.add_column("Status")
     table.add_column("Detail")
-    for config in default_integrations():
+    for config in load_integrations(_root()):
         check = check_integration_config(config)
-        table.add_row(check.name, check.kind.value, check.status.value, check.detail)
+        table.add_row(
+            check.name, check.kind.value, check.adapter, check.status.value, check.detail
+        )
     console.print(table)
+
+
+@app.command("integration-publish")
+def integration_publish_cmd(
+    send: Annotated[
+        bool,
+        typer.Option("--send/--dry-run", help="Transmit to integrations instead of a dry run"),
+    ] = False,
+) -> None:
+    root = _root()
+    results = validate_all(root)
+    outcomes = publish_all(results, load_integrations(root), dry_run=not send, root=root)
+    if not outcomes:
+        console.print(
+            "integration-publish: no ready integrations; run integration-check for details"
+        )
+        return
+
+    table = Table(title=f"GreyNOC DMZ Publish ({'send' if send else 'dry-run'})")
+    table.add_column("Integration")
+    table.add_column("Adapter")
+    table.add_column("Scenario")
+    table.add_column("Outcome")
+    table.add_column("Detail")
+    problems = 0
+    for outcome in outcomes:
+        if outcome.outcome in {PublishOutcome.error, PublishOutcome.blocked}:
+            problems += 1
+        table.add_row(
+            outcome.integration,
+            outcome.adapter,
+            outcome.scenario_id,
+            outcome.outcome.value,
+            outcome.detail,
+        )
+    console.print(table)
+    if problems:
+        raise typer.Exit(code=1)
 
 
 @app.command("security-check")
