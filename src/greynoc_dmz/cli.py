@@ -16,6 +16,7 @@ from .ai import (
     run_scenario_review,
 )
 from .dashboard import serve
+from .dataset import DatasetFormat, build_dataset, run_lab, write_dataset
 from .engine import run_scenario, validate_all
 from .integrations import (
     PublishOutcome,
@@ -178,6 +179,43 @@ def ai_review_cmd() -> None:
         raise typer.Exit(code=1) from error
     console.print("AI-assisted advisory review", style="bold")
     console.print(review.text, markup=False)
+
+
+@app.command("export-dataset")
+def export_dataset_cmd(
+    output_format: Annotated[
+        DatasetFormat, typer.Option("--format", help="Dataset format: raw or chat")
+    ] = DatasetFormat.raw,
+    out: Annotated[
+        Path, typer.Option("--out", help="Output JSONL path")
+    ] = Path("datasets/dmz-dataset.jsonl"),
+    with_ai: Annotated[
+        bool, typer.Option("--with-ai", help="Add a per-scenario AI analysis note")
+    ] = False,
+) -> None:
+    root = _root()
+    runs = run_lab(root)
+    ai_notes: dict[str, str] | None = None
+    if with_ai:
+        config = load_ai_config()
+        readiness = check_ai_readiness(config)
+        if readiness.status is not AIReadinessStatus.ready:
+            console.print(
+                f"export-dataset: --with-ai needs a ready AI provider ({readiness.detail})"
+            )
+            raise typer.Exit(code=1)
+        ai_notes = {}
+        for run in runs:
+            try:
+                ai_notes[run.scenario.id] = run_scenario_review(config, [run.result]).text
+            except AIProviderError as error:
+                console.print(f"export-dataset: AI note skipped for {run.scenario.id}: {error}")
+    records = build_dataset(runs, output_format, ai_notes=ai_notes)
+    out_path = out if out.is_absolute() else root / out
+    write_dataset(records, out_path)
+    console.print(
+        f"export-dataset: wrote {len(records)} {output_format.value} record(s) to {out_path}"
+    )
 
 
 @app.command("security-check")

@@ -6,7 +6,7 @@ The app replays known events, runs detection rules, compares expected alerts wit
 
 ## Status
 
-Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, working outbound integration adapters (file, webhook, Splunk HEC, Jira), a vendor-neutral AI provider layer, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Inbound telemetry adapters and provider-specific EDR adapters are planned.
+Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, working outbound integration adapters (file, webhook, Splunk HEC, Jira), a vendor-neutral AI provider layer, training-data export, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Inbound telemetry adapters and provider-specific EDR adapters are planned.
 
 ## What this repo is for
 
@@ -37,6 +37,7 @@ greynoc-dmz integration-check
 greynoc-dmz validate-all
 greynoc-dmz integration-publish
 greynoc-dmz ai-check
+greynoc-dmz export-dataset
 
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
 ```
@@ -138,6 +139,23 @@ servers (Ollama, LM Studio, vLLM). API keys are read from a named environment
 variable at call time, never stored in config or git. External provider
 endpoints are blocked unless `GREYNOC_DMZ_AI_ALLOW_EXTERNAL=true`, and AI output
 is advisory only. See `docs/ai-providers.md` for configuration and safety.
+
+## Training data
+
+Every scenario run can be exported as a labeled record for training or
+fine-tuning a security AI model — DMZ as a training-data factory. Each scenario
+added to the lab becomes another labeled example.
+
+```bash
+greynoc-dmz export-dataset                 # raw labeled JSONL
+greynoc-dmz export-dataset --format chat   # OpenAI fine-tuning JSONL
+greynoc-dmz export-dataset --with-ai       # add a per-scenario AI analysis note
+```
+
+Records carry the synthetic telemetry, the expected detections (the ground-truth
+label), the alerts produced, the pass/fail outcome, and an optional AI note.
+Generated datasets are written under `datasets/` and are not committed. See
+`docs/training-data.md`.
 
 ## Dashboard
 
