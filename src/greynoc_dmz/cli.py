@@ -7,6 +7,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .ai import (
+    AIProviderError,
+    AIReadinessStatus,
+    check_ai_readiness,
+    load_ai_config,
+    run_live_check,
+    run_scenario_review,
+)
 from .dashboard import serve
 from .engine import run_scenario, validate_all
 from .integrations import (
@@ -122,6 +130,54 @@ def integration_publish_cmd(
     console.print(table)
     if problems:
         raise typer.Exit(code=1)
+
+
+@app.command("ai-check")
+def ai_check_cmd(
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Make a live provider call to confirm connectivity"),
+    ] = False,
+) -> None:
+    config = load_ai_config()
+    readiness = check_ai_readiness(config)
+    table = Table(title="GreyNOC DMZ AI Provider")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Status", readiness.status.value)
+    table.add_row("Provider", readiness.provider)
+    table.add_row("Model", readiness.model or "not set")
+    table.add_row("External", "yes" if readiness.external else "no")
+    table.add_row("Detail", readiness.detail)
+    console.print(table)
+    if not live:
+        return
+    if readiness.status is not AIReadinessStatus.ready:
+        console.print("ai-check --live: provider is not ready")
+        raise typer.Exit(code=1)
+    try:
+        response = run_live_check(config)
+    except AIProviderError as error:
+        console.print(f"ai-check --live: failed: {error}")
+        raise typer.Exit(code=1) from error
+    console.print(f"ai-check --live: ok ({response.provider} / {response.model})")
+
+
+@app.command("ai-review")
+def ai_review_cmd() -> None:
+    config = load_ai_config()
+    readiness = check_ai_readiness(config)
+    if readiness.status is not AIReadinessStatus.ready:
+        console.print(f"ai-review: AI provider is not ready ({readiness.detail})")
+        raise typer.Exit(code=1)
+    results = validate_all(_root())
+    try:
+        review = run_scenario_review(config, results)
+    except AIProviderError as error:
+        console.print(f"ai-review: failed: {error}")
+        raise typer.Exit(code=1) from error
+    console.print("AI-assisted advisory review", style="bold")
+    console.print(review.text, markup=False)
 
 
 @app.command("security-check")

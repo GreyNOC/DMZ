@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .ai import AIReadiness, check_ai_readiness, load_ai_config
 from .auth import (
     AuthConfig,
     SessionStore,
@@ -48,6 +49,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     validate_all(self.root),
                     read_history(self.root / ".dmz"),
                     integration_checks,
+                    check_ai_readiness(load_ai_config()),
                     self.auth_config.enabled,
                 )
             )
@@ -66,6 +68,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             integration_checks = [
                 check_integration_config(config) for config in load_integrations(self.root)
             ]
+            ai_readiness = check_ai_readiness(load_ai_config())
             payload = {
                 "app": "GreyNOC DMZ",
                 "auth_enabled": self.auth_config.enabled,
@@ -82,6 +85,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     }
                     for check in integration_checks
                 ],
+                "ai": {
+                    "status": ai_readiness.status.value,
+                    "provider": ai_readiness.provider,
+                    "model": ai_readiness.model,
+                    "external": ai_readiness.external,
+                },
             }
             self._send_json(payload)
             return
@@ -219,6 +228,7 @@ def render_dashboard(
     results: list[ScenarioResult],
     history: list[dict[str, object]],
     integration_checks: list[IntegrationCheck],
+    ai_readiness: AIReadiness,
     auth_enabled: bool,
 ) -> str:
     rows = []
@@ -268,6 +278,12 @@ def render_dashboard(
             "</tr>"
         )
 
+    ai_status = ai_readiness.status.value
+    ai_status_class = "pass" if ai_status == "ready" else "fail"
+    ai_provider = html.escape(ai_readiness.provider)
+    ai_model = html.escape(ai_readiness.model or "not set")
+    ai_detail = html.escape(ai_readiness.detail)
+
     auth_label = "enabled" if auth_enabled else "disabled"
     body = f"""
         <div class="panel">
@@ -297,6 +313,15 @@ def render_dashboard(
           <table>
             <thead><tr><th>Name</th><th>Kind</th><th>Adapter</th><th>Status</th><th>Detail</th></tr></thead>
             <tbody>{''.join(integration_rows) or '<tr><td colspan="5">No integrations configured.</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>AI provider</h3>
+          <table>
+            <tr><th>Status</th><td><span class="status {ai_status_class}">{ai_status}</span></td></tr>
+            <tr><th>Provider</th><td>{ai_provider}</td></tr>
+            <tr><th>Model</th><td>{ai_model}</td></tr>
+            <tr><th>Detail</th><td>{ai_detail}</td></tr>
           </table>
         </div>
         <div class="panel">Authentication: <code>{auth_label}</code>. Status API: <code>/api/status</code></div>

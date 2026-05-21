@@ -6,7 +6,7 @@ The app replays known events, runs detection rules, compares expected alerts wit
 
 ## Status
 
-Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, working outbound integration adapters (file, webhook, Splunk HEC, Jira), tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Inbound telemetry adapters and provider-specific EDR adapters are planned.
+Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, working outbound integration adapters (file, webhook, Splunk HEC, Jira), a vendor-neutral AI provider layer, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Inbound telemetry adapters and provider-specific EDR adapters are planned.
 
 ## What this repo is for
 
@@ -36,6 +36,7 @@ greynoc-dmz security-check
 greynoc-dmz integration-check
 greynoc-dmz validate-all
 greynoc-dmz integration-publish
+greynoc-dmz ai-check
 
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
 ```
@@ -119,6 +120,24 @@ greynoc-dmz integration-publish --send   # transmit to ready integrations
 Integrations are disabled by default. External endpoints are blocked unless
 `GREYNOC_DMZ_ALLOW_EXTERNAL=1` is set or the host is allowlisted. See
 `docs/integrations.md` for adapter details, configuration, and the safety model.
+
+## AI providers
+
+Teams can plug in their own AI provider (hosted or local) for advisory analysis
+of detection-validation results. AI is disabled by default and is configured
+entirely through `GREYNOC_DMZ_AI_*` environment variables.
+
+```bash
+greynoc-dmz ai-check          # report AI readiness (no provider call)
+greynoc-dmz ai-check --live   # confirm connectivity with one live call
+greynoc-dmz ai-review         # AI advisory review of validation results
+```
+
+The `openai_compatible` adapter covers the OpenAI API, Azure OpenAI, and local
+servers (Ollama, LM Studio, vLLM). API keys are read from a named environment
+variable at call time, never stored in config or git. External provider
+endpoints are blocked unless `GREYNOC_DMZ_AI_ALLOW_EXTERNAL=true`, and AI output
+is advisory only. See `docs/ai-providers.md` for configuration and safety.
 
 ## Dashboard
 

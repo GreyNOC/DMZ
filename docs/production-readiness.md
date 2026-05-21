@@ -30,6 +30,8 @@ Do not expose the built-in Python dashboard directly to the public internet. It 
 - Vendor-neutral outbound integration adapters
 - Integration endpoint safety gate (local and private allowed, external opt-in)
 - Dry-run-by-default integration publishing
+- Vendor-neutral AI provider layer, disabled by default
+- AI endpoint safety gate and advisory-only AI output
 
 ## Known gaps
 
@@ -51,5 +53,6 @@ mypy src
 pytest
 greynoc-dmz security-check
 greynoc-dmz integration-check
+greynoc-dmz ai-check
 greynoc-dmz validate-all
 ```

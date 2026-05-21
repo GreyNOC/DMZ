@@ -1,5 +1,7 @@
 # AI Provider Implementation Plan
 
+> Status: implemented. The provider layer, OpenAI-compatible adapter, `ai-check`, and `ai-review` are built — see `docs/ai-providers.md`. Remaining roadmap: provider-specific adapters and training-data export.
+
 GreyNOC DMZ should support user-selected AI APIs through a vendor-neutral provider layer. The goal is to let users bring their preferred hosted or local AI provider without tying the project to one vendor.
 
 This plan follows the existing integration direction in `docs/integrations.md` and `src/greynoc_dmz/integrations.py`: keep provider-specific code behind small interfaces, keep credentials out of git, and default to safe local lab behavior.
