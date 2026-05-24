@@ -5,7 +5,7 @@ def test_ai_battle_is_deterministic() -> None:
     first = simulate_battle("Sentinel", "Phantom", rounds=3)
     second = simulate_battle("Sentinel", "Phantom", rounds=3)
 
-    assert first.model_dump() == second.model_dump()
+    assert first.to_dict() == second.to_dict()
     assert len(first.rounds) == 3
     assert first.winner in {"Sentinel", "Phantom", "draw"}
 
