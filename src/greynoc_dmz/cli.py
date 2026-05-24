@@ -7,6 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .ai_battle import simulate_battle
 from .dashboard import serve
 from .engine import run_scenario, validate_all
 from .integrations import check_integration_config, default_integrations
@@ -63,6 +64,40 @@ def validate_all_cmd() -> None:
     console.print(table)
     if failed:
         raise typer.Exit(code=1)
+
+
+@app.command("ai-battle")
+def ai_battle_cmd(
+    ai_one: Annotated[str, typer.Option("--ai-one")] = "Sentinel",
+    ai_two: Annotated[str, typer.Option("--ai-two")] = "Phantom",
+    rounds: Annotated[int, typer.Option("--rounds", min=1, max=25)] = 5,
+    objective: Annotated[str, typer.Option("--objective")] = "Establish operational dominance in a synthetic SOC exercise.",
+    ai_one_strategy: Annotated[str, typer.Option("--ai-one-strategy")] = "balanced",
+    ai_two_strategy: Annotated[str, typer.Option("--ai-two-strategy")] = "adaptive",
+) -> None:
+    result = simulate_battle(ai_one, ai_two, rounds, objective, ai_one_strategy, ai_two_strategy)
+
+    table = Table(title="GreyNOC DMZ AI Battle")
+    table.add_column("Round")
+    table.add_column("Challenge")
+    table.add_column(result.ai_one.name)
+    table.add_column(result.ai_two.name)
+    table.add_column("Winner")
+
+    for battle_round in result.rounds:
+        table.add_row(
+            str(battle_round.round_number),
+            battle_round.challenge,
+            str(battle_round.ai_one_score),
+            str(battle_round.ai_two_score),
+            battle_round.winner,
+        )
+
+    console.print(table)
+    console.print(f"{result.ai_one.name}: {result.ai_one_total}")
+    console.print(f"{result.ai_two.name}: {result.ai_two_total}")
+    console.print(f"winner: {result.winner}")
+    console.print(result.summary)
 
 
 @app.command("integration-check")
