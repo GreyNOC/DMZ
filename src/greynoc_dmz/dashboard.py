@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .ai_battle import BattleResult, simulate_battle
 from .auth import (
     AuthConfig,
     SessionStore,
@@ -50,6 +51,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             self._send_html(render_scenario_detail(result, self.auth_config.enabled))
             return
+        if parsed.path == "/ai-battle":
+            params = parse_qs(parsed.query)
+            result = _battle_from_params(params)
+            self._send_html(render_ai_battle(result))
+            return
+        if parsed.path == "/api/ai-battle":
+            params = parse_qs(parsed.query)
+            self._send_json(_battle_from_params(params).model_dump())
+            return
         if parsed.path == "/api/status":
             results = validate_all(self.root)
             payload = {
@@ -59,6 +69,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "passing": sum(1 for item in results if item.passed),
                 "failing": sum(1 for item in results if not item.passed),
                 "results": [item.model_dump(mode="json") for item in results],
+                "ai_battle_api": "/api/ai-battle",
             }
             self._send_json(payload)
             return
@@ -122,6 +133,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return
 
 
+def _first(params: dict[str, list[str]], key: str, default: str) -> str:
+    return params.get(key, [default])[0] or default
+
+
+def _battle_from_params(params: dict[str, list[str]]) -> BattleResult:
+    rounds_text = _first(params, "rounds", "5")
+    try:
+        rounds = int(rounds_text)
+    except ValueError:
+        rounds = 5
+
+    return simulate_battle(
+        _first(params, "one", "Sentinel"),
+        _first(params, "two", "Phantom"),
+        rounds,
+        _first(params, "objective", "Establish operational dominance in a synthetic SOC exercise."),
+        _first(params, "one_strategy", "balanced"),
+        _first(params, "two_strategy", "adaptive"),
+    )
+
+
 def _page(title: str, body: str) -> str:
     return f"""<!doctype html>
 <html lang="en">
@@ -150,20 +182,22 @@ def _page(title: str, body: str) -> str:
     .status {{ display: inline-block; min-width: 46px; text-align: center; padding: 2px 5px; border: 1px solid #444; background: white; }}
     .status.pass {{ color: #0b5f17; }}
     .status.fail {{ color: #8a0000; }}
+    .status.win {{ color: #0a246a; }}
     .footer {{ padding: 4px 8px; border-top: 1px solid #808080; font-size: 12px; }}
     code, pre {{ font-family: Consolas, monospace; }}
     input {{ width: 100%; padding: 5px; border: 2px inset #fff; background: white; }}
     button {{ padding: 4px 12px; border: 2px outset #fff; background: #d4d0c8; }}
     .form {{ max-width: 360px; }}
+    .battle-form {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }}
     .error {{ color: #8a0000; }}
-    @media (max-width: 800px) {{ .grid {{ grid-template-columns: 1fr 1fr; }} }}
+    @media (max-width: 800px) {{ .grid, .battle-form {{ grid-template-columns: 1fr 1fr; }} }}
   </style>
 </head>
 <body>
   <div class="desktop">
     <div class="window">
       <div class="titlebar"><span>{html.escape(title)}</span><span class="controls"><span>_</span><span>[]</span><span>X</span></span></div>
-      <div class="menu"><a href="/">Scenarios</a><a href="/api/status">API</a><a href="/logout">Logout</a></div>
+      <div class="menu"><a href="/">Scenarios</a><a href="/ai-battle">AI Battle</a><a href="/api/status">API</a><a href="/logout">Logout</a></div>
       <div class="content">{body}</div>
       <div class="footer">GreyNOC DMZ local detection manager</div>
     </div>
@@ -238,6 +272,11 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
           </div>
         </div>
         <div class="panel">
+          <h3>AI Battle Arena</h3>
+          <p>Run two local AI profiles against each other in a synthetic SOC dominance exercise.</p>
+          <p><a href="/ai-battle">Open AI Battle</a> or call <code>/api/ai-battle</code>.</p>
+        </div>
+        <div class="panel">
           <h3>Scenario status</h3>
           <table>
             <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Fired</th><th>Missing</th><th>Unexpected</th></tr></thead>
@@ -254,6 +293,55 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
         <div class="panel">Authentication: <code>{auth_label}</code>. Status API: <code>/api/status</code></div>
     """
     return _page("GreyNOC DMZ - Detection Manager", body)
+
+
+def render_ai_battle(result: BattleResult) -> str:
+    round_rows = []
+    for battle_round in result.rounds:
+        round_rows.append(
+            "<tr>"
+            f"<td>{battle_round.round_number}</td>"
+            f"<td>{html.escape(battle_round.challenge)}</td>"
+            f"<td>{html.escape(battle_round.ai_one_move)}<br><b>{battle_round.ai_one_score}</b></td>"
+            f"<td>{html.escape(battle_round.ai_two_move)}<br><b>{battle_round.ai_two_score}</b></td>"
+            f"<td><span class='status win'>{html.escape(battle_round.winner)}</span><br>{html.escape(battle_round.reason)}</td>"
+            "</tr>"
+        )
+
+    body = f"""
+      <div class="panel">
+        <form method="get" action="/ai-battle">
+          <div class="battle-form">
+            <label>AI One<br><input name="one" value="{html.escape(result.ai_one.name)}"></label>
+            <label>AI Two<br><input name="two" value="{html.escape(result.ai_two.name)}"></label>
+            <label>Rounds<br><input name="rounds" value="{len(result.rounds)}"></label>
+            <label>AI One Strategy<br><input name="one_strategy" value="{html.escape(result.ai_one.strategy)}"></label>
+            <label>AI Two Strategy<br><input name="two_strategy" value="{html.escape(result.ai_two.strategy)}"></label>
+            <label>Objective<br><input name="objective" value="{html.escape(result.objective)}"></label>
+          </div>
+          <p><button type="submit">Start Battle</button></p>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>Dominance Result</h3>
+        <table>
+          <tr><th>Objective</th><td>{html.escape(result.objective)}</td></tr>
+          <tr><th>{html.escape(result.ai_one.name)}</th><td>{result.ai_one_total}</td></tr>
+          <tr><th>{html.escape(result.ai_two.name)}</th><td>{result.ai_two_total}</td></tr>
+          <tr><th>Winner</th><td><span class='status win'>{html.escape(result.winner)}</span></td></tr>
+          <tr><th>Summary</th><td>{html.escape(result.summary)}</td></tr>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Round Log</h3>
+        <table>
+          <thead><tr><th>Round</th><th>Challenge</th><th>{html.escape(result.ai_one.name)}</th><th>{html.escape(result.ai_two.name)}</th><th>Winner</th></tr></thead>
+          <tbody>{''.join(round_rows)}</tbody>
+        </table>
+      </div>
+      <div class="panel">JSON API: <code>/api/ai-battle?one={html.escape(result.ai_one.name)}&amp;two={html.escape(result.ai_two.name)}&amp;rounds={len(result.rounds)}</code></div>
+    """
+    return _page("GreyNOC DMZ - AI Battle", body)
 
 
 def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
