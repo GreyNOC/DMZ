@@ -58,7 +58,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/ai-battle":
             params = parse_qs(parsed.query)
-            self._send_json(_battle_from_params(params).model_dump())
+            self._send_json(_battle_from_params(params).to_dict())
             return
         if parsed.path == "/api/status":
             results = validate_all(self.root)
