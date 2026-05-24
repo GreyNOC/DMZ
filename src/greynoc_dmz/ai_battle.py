@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from hashlib import sha256
 
 
@@ -11,6 +11,15 @@ class AiProfile:
     aggression: int
     defense: int
     adaptability: int
+
+    def model_dump(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "strategy": self.strategy,
+            "aggression": self.aggression,
+            "defense": self.defense,
+            "adaptability": self.adaptability,
+        }
 
 
 @dataclass(frozen=True)
@@ -23,6 +32,18 @@ class BattleRound:
     ai_two_score: int
     winner: str
     reason: str
+
+    def model_dump(self) -> dict[str, object]:
+        return {
+            "round_number": self.round_number,
+            "challenge": self.challenge,
+            "ai_one_move": self.ai_one_move,
+            "ai_two_move": self.ai_two_move,
+            "ai_one_score": self.ai_one_score,
+            "ai_two_score": self.ai_two_score,
+            "winner": self.winner,
+            "reason": self.reason,
+        }
 
 
 @dataclass(frozen=True)
@@ -37,7 +58,16 @@ class BattleResult:
     summary: str
 
     def model_dump(self) -> dict[str, object]:
-        return asdict(self)
+        return {
+            "ai_one": self.ai_one.model_dump(),
+            "ai_two": self.ai_two.model_dump(),
+            "objective": self.objective,
+            "rounds": [battle_round.model_dump() for battle_round in self.rounds],
+            "ai_one_total": self.ai_one_total,
+            "ai_two_total": self.ai_two_total,
+            "winner": self.winner,
+            "summary": self.summary,
+        }
 
 
 CHALLENGES = [
