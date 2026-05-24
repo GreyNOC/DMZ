@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -12,7 +13,7 @@ class AiProfile:
     defense: int
     adaptability: int
 
-    def model_dump(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "strategy": self.strategy,
@@ -33,7 +34,7 @@ class BattleRound:
     winner: str
     reason: str
 
-    def model_dump(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "round_number": self.round_number,
             "challenge": self.challenge,
@@ -57,12 +58,12 @@ class BattleResult:
     winner: str
     summary: str
 
-    def model_dump(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
-            "ai_one": self.ai_one.model_dump(),
-            "ai_two": self.ai_two.model_dump(),
+            "ai_one": self.ai_one.to_dict(),
+            "ai_two": self.ai_two.to_dict(),
             "objective": self.objective,
-            "rounds": [battle_round.model_dump() for battle_round in self.rounds],
+            "rounds": [battle_round.to_dict() for battle_round in self.rounds],
             "ai_one_total": self.ai_one_total,
             "ai_two_total": self.ai_two_total,
             "winner": self.winner,
