@@ -47,6 +47,12 @@ Run one scenario:
 greynoc-dmz run-scenario --scenario scenarios/auth-bruteforce-sim.json
 ```
 
+Run two AI profiles against each other in a local synthetic dominance exercise:
+
+```bash
+greynoc-dmz ai-battle --ai-one Sentinel --ai-two Phantom --rounds 5 --ai-one-strategy balanced --ai-two-strategy adaptive
+```
+
 Run with Docker:
 
 ```bash
@@ -96,6 +102,38 @@ Generated local history is written under `.dmz/` and ignored by git.
 7. Generate a report.
 8. Tune and retest.
 
+## AI battle arena
+
+The AI battle arena puts two named AI profiles into a deterministic local contest. Each profile gets generated tactical stats, chooses from safe SOC-style strategies, and competes across synthetic challenges such as telemetry triage, containment, evidence handling, rule adaptation, false-positive reduction, and recovery prioritization.
+
+Available strategies:
+
+- `balanced`
+- `aggressive`
+- `defensive`
+- `adaptive`
+- `analyst`
+
+CLI example:
+
+```bash
+greynoc-dmz ai-battle --ai-one Sentinel --ai-two Phantom --rounds 7 --objective "Own the SOC workflow without losing evidence"
+```
+
+Dashboard route:
+
+```text
+http://127.0.0.1:8787/ai-battle
+```
+
+JSON API example:
+
+```text
+http://127.0.0.1:8787/api/ai-battle?one=Sentinel&two=Phantom&rounds=5&one_strategy=balanced&two_strategy=adaptive
+```
+
+This feature is intentionally synthetic. It does not launch tools, attack systems, or run autonomous offensive activity.
+
 ## Integrations
 
 The first integration pass is vendor-neutral. It adds connector types and readiness checks for:
@@ -115,9 +153,9 @@ The current command checks built-in placeholder connectors and reports whether t
 
 ## Dashboard
 
-The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, rule coverage, recent validation history, and scenario detail pages.
+The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, rule coverage, recent validation history, scenario detail pages, and the AI battle arena.
 
-The dashboard is local-first. It serves static HTML and a small JSON status endpoint. It also sets basic browser security headers.
+The dashboard is local-first. It serves static HTML and small JSON endpoints. It also sets basic browser security headers.
 
 ## Role model
 
