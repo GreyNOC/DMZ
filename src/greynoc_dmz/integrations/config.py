@@ -64,9 +64,7 @@ def check_integration_config(config: IntegrationConfig) -> IntegrationCheck:
     return _check(config, IntegrationStatus.ready, "configuration present")
 
 
-def _check(
-    config: IntegrationConfig, status: IntegrationStatus, detail: str
-) -> IntegrationCheck:
+def _check(config: IntegrationConfig, status: IntegrationStatus, detail: str) -> IntegrationCheck:
     return IntegrationCheck(
         name=config.name,
         kind=config.kind,

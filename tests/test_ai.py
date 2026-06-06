@@ -87,9 +87,7 @@ def test_missing_model_reports_missing_config() -> None:
 
 
 def test_unsupported_provider_reports_missing_config() -> None:
-    config = AIConfig(
-        enabled=True, provider="mystery", base_url="http://127.0.0.1:1/v1", model="m"
-    )
+    config = AIConfig(enabled=True, provider="mystery", base_url="http://127.0.0.1:1/v1", model="m")
 
     assert check_ai_readiness(config).status == AIReadinessStatus.missing_config
 

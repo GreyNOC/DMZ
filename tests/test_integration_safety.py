@@ -52,9 +52,7 @@ def test_external_endpoint_allowed_when_policy_permits() -> None:
 
 
 def test_external_endpoint_allowed_by_allowlist() -> None:
-    policy = SafetyPolicy(
-        allow_external=False, allowlist=frozenset({"splunk.example.invalid"})
-    )
+    policy = SafetyPolicy(allow_external=False, allowlist=frozenset({"splunk.example.invalid"}))
 
     verdict = check_endpoint("https://splunk.example.invalid:8088", policy)
 

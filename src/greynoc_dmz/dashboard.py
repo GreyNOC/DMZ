@@ -107,7 +107,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         username = params.get("username", [""])[0]
         password = params.get("password", [""])[0]
         if verify_login(self.auth_config, username, password):
-            session = self.sessions.create(username or self.auth_config.username, self.auth_config.role)
+            session = self.sessions.create(
+                username or self.auth_config.username, self.auth_config.role
+            )
             secure = self.headers.get("X-Forwarded-Proto") == "https"
             self._redirect("/", cookie=build_session_cookie(session, secure=secure))
             return
@@ -119,7 +121,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         token = parse_cookie(self.headers.get("Cookie"))
         return self.sessions.get(token) is not None
 
-    def _redirect(self, location: str, cookie: str | None = None, clear_cookie: bool = False) -> None:
+    def _redirect(
+        self, location: str, cookie: str | None = None, clear_cookie: bool = False
+    ) -> None:
         self.send_response(302)
         self.send_header("Location", location)
         if cookie:
@@ -132,7 +136,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         payload = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+        )
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cache-Control", "no-store")
@@ -298,21 +305,21 @@ def render_dashboard(
           <h3>Scenario status</h3>
           <table>
             <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Fired</th><th>Missing</th><th>Unexpected</th></tr></thead>
-            <tbody>{''.join(rows)}</tbody>
+            <tbody>{"".join(rows)}</tbody>
           </table>
         </div>
         <div class="panel">
           <h3>Recent validation history</h3>
           <table>
             <thead><tr><th>Recorded</th><th>Scenario</th><th>Status</th><th>Alerts</th></tr></thead>
-            <tbody>{''.join(history_rows) or '<tr><td colspan="4">No history yet.</td></tr>'}</tbody>
+            <tbody>{"".join(history_rows) or '<tr><td colspan="4">No history yet.</td></tr>'}</tbody>
           </table>
         </div>
         <div class="panel">
           <h3>Integrations</h3>
           <table>
             <thead><tr><th>Name</th><th>Kind</th><th>Adapter</th><th>Status</th><th>Detail</th></tr></thead>
-            <tbody>{''.join(integration_rows) or '<tr><td colspan="5">No integrations configured.</td></tr>'}</tbody>
+            <tbody>{"".join(integration_rows) or '<tr><td colspan="5">No integrations configured.</td></tr>'}</tbody>
           </table>
         </div>
         <div class="panel">
@@ -351,18 +358,18 @@ def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
         <table>
           <tr><th>Scenario ID</th><td>{html.escape(result.scenario_id)}</td></tr>
           <tr><th>Status</th><td><span class='status {status.lower()}'>{status}</span></td></tr>
-          <tr><th>Expected</th><td>{html.escape(', '.join(result.expected_rules) or 'none')}</td></tr>
-          <tr><th>Fired</th><td>{html.escape(', '.join(result.fired_rules) or 'none')}</td></tr>
-          <tr><th>Missing</th><td>{html.escape(', '.join(result.missing_rules) or 'none')}</td></tr>
-          <tr><th>Unexpected</th><td>{html.escape(', '.join(result.unexpected_rules) or 'none')}</td></tr>
-          <tr><th>Authentication</th><td>{'enabled' if auth_enabled else 'disabled'}</td></tr>
+          <tr><th>Expected</th><td>{html.escape(", ".join(result.expected_rules) or "none")}</td></tr>
+          <tr><th>Fired</th><td>{html.escape(", ".join(result.fired_rules) or "none")}</td></tr>
+          <tr><th>Missing</th><td>{html.escape(", ".join(result.missing_rules) or "none")}</td></tr>
+          <tr><th>Unexpected</th><td>{html.escape(", ".join(result.unexpected_rules) or "none")}</td></tr>
+          <tr><th>Authentication</th><td>{"enabled" if auth_enabled else "disabled"}</td></tr>
         </table>
       </div>
       <div class="panel">
         <h3>Alerts</h3>
         <table>
           <thead><tr><th>Rule</th><th>Name</th><th>Severity</th><th>Host</th><th>User</th><th>Events</th><th>Runbook</th></tr></thead>
-          <tbody>{''.join(alert_rows) or '<tr><td colspan="7">No alerts fired.</td></tr>'}</tbody>
+          <tbody>{"".join(alert_rows) or '<tr><td colspan="7">No alerts fired.</td></tr>'}</tbody>
         </table>
       </div>
     """

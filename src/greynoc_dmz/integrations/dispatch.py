@@ -85,8 +85,6 @@ def publish_all(
             continue
         for result in results:
             outcomes.append(
-                publish_result(
-                    result, config, dry_run=dry_run, root=root, policy=active_policy
-                )
+                publish_result(result, config, dry_run=dry_run, root=root, policy=active_policy)
             )
     return outcomes

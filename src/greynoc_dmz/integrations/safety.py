@@ -42,9 +42,7 @@ def _env_flag(name: str) -> bool:
 def load_safety_policy() -> SafetyPolicy:
     """Build the safety policy from environment variables."""
     raw_allowlist = os.environ.get("GREYNOC_DMZ_INTEGRATION_ALLOWLIST", "")
-    allowlist = frozenset(
-        item.strip().lower() for item in raw_allowlist.split(",") if item.strip()
-    )
+    allowlist = frozenset(item.strip().lower() for item in raw_allowlist.split(",") if item.strip())
     return SafetyPolicy(
         allow_external=_env_flag("GREYNOC_DMZ_ALLOW_EXTERNAL"),
         allowlist=allowlist,

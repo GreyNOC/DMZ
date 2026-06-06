@@ -37,7 +37,11 @@ def check_ai_readiness(config: AIConfig) -> AIReadiness:
         )
     if not config.base_url:
         return AIReadiness(
-            AIReadinessStatus.missing_config, provider, model, "missing GREYNOC_DMZ_AI_BASE_URL", False
+            AIReadinessStatus.missing_config,
+            provider,
+            model,
+            "missing GREYNOC_DMZ_AI_BASE_URL",
+            False,
         )
     if not model:
         return AIReadiness(
@@ -59,7 +63,11 @@ def check_ai_readiness(config: AIConfig) -> AIReadiness:
     if not verdict.allowed:
         return AIReadiness(AIReadinessStatus.blocked, provider, model, verdict.reason, external)
     return AIReadiness(
-        AIReadinessStatus.ready, provider, model, f"{verdict.scope.value} provider endpoint", external
+        AIReadinessStatus.ready,
+        provider,
+        model,
+        f"{verdict.scope.value} provider endpoint",
+        external,
     )
 
 

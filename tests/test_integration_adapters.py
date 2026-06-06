@@ -106,13 +106,9 @@ def _context(
 
 
 def test_file_sink_writes_ndjson(tmp_path: Path) -> None:
-    config = IntegrationConfig(
-        name="f", kind=IntegrationKind.file, adapter="file", enabled=True
-    )
+    config = IntegrationConfig(name="f", kind=IntegrationKind.file, adapter="file", enabled=True)
 
-    outcome = FileSink().publish_result(
-        _scenario_result(), _context(config, tmp_path, token=None)
-    )
+    outcome = FileSink().publish_result(_scenario_result(), _context(config, tmp_path, token=None))
 
     assert outcome.outcome == PublishOutcome.sent
     feed = tmp_path / "evidence" / "integration-outbox.ndjson"
@@ -121,9 +117,7 @@ def test_file_sink_writes_ndjson(tmp_path: Path) -> None:
 
 
 def test_file_sink_dry_run_writes_nothing(tmp_path: Path) -> None:
-    config = IntegrationConfig(
-        name="f", kind=IntegrationKind.file, adapter="file", enabled=True
-    )
+    config = IntegrationConfig(name="f", kind=IntegrationKind.file, adapter="file", enabled=True)
 
     outcome = FileSink().publish_result(
         _scenario_result(), _context(config, tmp_path, token=None, dry_run=True)
@@ -173,9 +167,7 @@ def test_webhook_missing_token_is_error(server: RecordingServer, tmp_path: Path)
     assert not server.captured
 
 
-def test_webhook_dry_run_does_not_call_server(
-    server: RecordingServer, tmp_path: Path
-) -> None:
+def test_webhook_dry_run_does_not_call_server(server: RecordingServer, tmp_path: Path) -> None:
     config = IntegrationConfig(
         name="hook",
         kind=IntegrationKind.edr,
@@ -193,9 +185,7 @@ def test_webhook_dry_run_does_not_call_server(
     assert not server.captured
 
 
-def test_webhook_error_response_hides_token(
-    server: RecordingServer, tmp_path: Path
-) -> None:
+def test_webhook_error_response_hides_token(server: RecordingServer, tmp_path: Path) -> None:
     server.reply_status = 500
     server.reply_body = "internal error"
     config = IntegrationConfig(
@@ -240,9 +230,7 @@ def test_splunk_hec_sends_event(server: RecordingServer, tmp_path: Path) -> None
     assert body["index"] == "greynoc_dmz"
 
 
-def test_jira_opens_ticket_for_failed_scenario(
-    server: RecordingServer, tmp_path: Path
-) -> None:
+def test_jira_opens_ticket_for_failed_scenario(server: RecordingServer, tmp_path: Path) -> None:
     server.reply_status = 201
     server.reply_body = '{"key": "SOC-42"}'
     config = IntegrationConfig(
@@ -326,9 +314,7 @@ def test_publish_all_sends_through_dispatch(
 
 
 def test_publish_all_dry_run_skips_file_write(tmp_path: Path) -> None:
-    config = IntegrationConfig(
-        name="f", kind=IntegrationKind.file, adapter="file", enabled=True
-    )
+    config = IntegrationConfig(name="f", kind=IntegrationKind.file, adapter="file", enabled=True)
 
     outcomes = publish_all(
         [_scenario_result()], [config], dry_run=True, root=tmp_path, policy=_NO_EXTERNAL

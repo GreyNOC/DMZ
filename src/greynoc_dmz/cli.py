@@ -89,9 +89,7 @@ def integration_check_cmd() -> None:
     table.add_column("Detail")
     for config in load_integrations(_root()):
         check = check_integration_config(config)
-        table.add_row(
-            check.name, check.kind.value, check.adapter, check.status.value, check.detail
-        )
+        table.add_row(check.name, check.kind.value, check.adapter, check.status.value, check.detail)
     console.print(table)
 
 
@@ -186,9 +184,9 @@ def export_dataset_cmd(
     output_format: Annotated[
         DatasetFormat, typer.Option("--format", help="Dataset format: raw or chat")
     ] = DatasetFormat.raw,
-    out: Annotated[
-        Path, typer.Option("--out", help="Output JSONL path")
-    ] = Path("datasets/dmz-dataset.jsonl"),
+    out: Annotated[Path, typer.Option("--out", help="Output JSONL path")] = Path(
+        "datasets/dmz-dataset.jsonl"
+    ),
     with_ai: Annotated[
         bool, typer.Option("--with-ai", help="Add a per-scenario AI analysis note")
     ] = False,
