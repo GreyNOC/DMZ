@@ -3,19 +3,14 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
+from .config import load_lab_config
 from .io import load_events, load_rules, load_scenario, write_json
+from .matching import value_matches
 from .models import Alert, DetectionRule, ScenarioResult, TelemetryEvent
 from .store import append_history
 
-
-def _value_matches(actual: Any, expected: Any) -> bool:
-    if isinstance(expected, list):
-        return actual in expected
-    if isinstance(actual, str) and isinstance(expected, str):
-        return expected.lower() in actual.lower()
-    return bool(actual == expected)
+_EVENT_ATTRIBUTES = {"message", "source", "host", "user", "ip", "event_type"}
 
 
 def event_matches_rule(event: TelemetryEvent, rule: DetectionRule) -> bool:
@@ -23,11 +18,8 @@ def event_matches_rule(event: TelemetryEvent, rule: DetectionRule) -> bool:
         return False
 
     for key, expected in rule.match.items():
-        if key in {"message", "source", "host", "user", "ip", "event_type"}:
-            actual = getattr(event, key)
-        else:
-            actual = event.fields.get(key)
-        if not _value_matches(actual, expected):
+        actual = getattr(event, key) if key in _EVENT_ATTRIBUTES else event.fields.get(key)
+        if not value_matches(actual, expected):
             return False
     return True
 
@@ -60,6 +52,8 @@ def run_rules(events: list[TelemetryEvent], rules: list[DetectionRule]) -> list[
             evidence = _threshold_window(group, rule.threshold, rule.window_minutes)
             if evidence is None:
                 continue
+            first_seen = evidence[0].timestamp
+            last_seen = evidence[-1].timestamp
             alerts.append(
                 Alert(
                     rule_id=rule.id,
@@ -68,8 +62,9 @@ def run_rules(events: list[TelemetryEvent], rules: list[DetectionRule]) -> list[
                     host=host,
                     user=user,
                     event_count=len(evidence),
-                    first_seen=evidence[0].timestamp,
-                    last_seen=evidence[-1].timestamp,
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                    dwell_seconds=(last_seen - first_seen).total_seconds(),
                     evidence=evidence,
                     runbook=rule.runbook,
                     mitre=rule.mitre,
@@ -83,10 +78,12 @@ def run_scenario(
     rule_dir: Path,
     evidence_dir: Path | None = None,
     history_dir: Path | None = None,
+    telemetry_root: Path | None = None,
 ) -> ScenarioResult:
     scenario = load_scenario(scenario_path)
     rules = load_rules(rule_dir)
-    telemetry_path = scenario_path.parent.parent / scenario.telemetry_file
+    base = telemetry_root if telemetry_root is not None else scenario_path.parent.parent
+    telemetry_path = base / scenario.telemetry_file
     events = load_events(telemetry_path)
     alerts = run_rules(events, rules)
 
@@ -114,9 +111,13 @@ def run_scenario(
     return result
 
 
-def validate_all(root: Path) -> list[ScenarioResult]:
+def validate_all(root: Path, persist: bool = True) -> list[ScenarioResult]:
+    config = load_lab_config(root)
+    rule_dir = root / "detections" / "rules"
+    evidence_dir = root / config.evidence_dir if persist else None
+    history_dir = root / ".dmz" if persist else None
     scenario_paths = sorted((root / "scenarios").glob("*.json"))
     return [
-        run_scenario(path, root / "detections" / "rules", root / "evidence", root / ".dmz")
+        run_scenario(path, rule_dir, evidence_dir, history_dir, telemetry_root=root)
         for path in scenario_paths
     ]

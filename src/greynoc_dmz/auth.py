@@ -34,15 +34,22 @@ class SessionStore:
         self._sessions: dict[str, Session] = {}
 
     def create(self, username: str, role: Role) -> Session:
+        now = time.time()
+        self._purge_expired(now)
         token = secrets.token_urlsafe(32)
         session = Session(
             token=token,
             username=username,
             role=role,
-            expires_at=time.time() + SESSION_TTL_SECONDS,
+            expires_at=now + SESSION_TTL_SECONDS,
         )
         self._sessions[token] = session
         return session
+
+    def _purge_expired(self, now: float) -> None:
+        expired = [token for token, session in self._sessions.items() if session.expires_at < now]
+        for token in expired:
+            self._sessions.pop(token, None)
 
     def get(self, token: str | None) -> Session | None:
         if not token:

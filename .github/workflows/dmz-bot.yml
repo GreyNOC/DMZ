@@ -25,6 +25,10 @@ jobs:
         run: pytest
       - name: Security check
         run: greynoc-dmz security-check
+      - name: Lint detection rules
+        run: greynoc-dmz lint
+      - name: Test detection rules
+        run: greynoc-dmz test-rules
       - name: Integration readiness
         run: greynoc-dmz integration-check
       - name: Scenario validation

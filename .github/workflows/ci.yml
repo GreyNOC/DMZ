@@ -47,6 +47,12 @@ jobs:
       - name: Run security check
         run: greynoc-dmz security-check
 
+      - name: Lint detection rules
+        run: greynoc-dmz lint
+
+      - name: Test detection rules
+        run: greynoc-dmz test-rules
+
       - name: Run integration check
         run: greynoc-dmz integration-check
 

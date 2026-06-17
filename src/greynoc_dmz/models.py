@@ -56,6 +56,7 @@ class Alert(BaseModel):
     event_count: int
     first_seen: datetime
     last_seen: datetime
+    dwell_seconds: float
     evidence: list[TelemetryEvent]
     runbook: str | None = None
     mitre: list[str] = Field(default_factory=list)

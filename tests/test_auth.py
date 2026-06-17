@@ -31,6 +31,17 @@ def test_session_store_create_get_delete() -> None:
     assert store.get(session.token) is None
 
 
+def test_session_store_purges_expired_on_create() -> None:
+    store = SessionStore()
+    stale = store.create("old", Role.viewer)
+    object.__setattr__(stale, "expires_at", 0.0)
+    store._sessions[stale.token] = stale
+
+    store.create("new", Role.admin)
+
+    assert stale.token not in store._sessions
+
+
 def test_session_cookie_helpers() -> None:
     store = SessionStore()
     session = store.create("admin", Role.admin)

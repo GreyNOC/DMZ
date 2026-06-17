@@ -9,5 +9,7 @@ COPY telemetry ./telemetry
 COPY runbooks ./runbooks
 COPY configs ./configs
 RUN python -m pip install --no-cache-dir .
+RUN useradd --create-home --uid 10001 dmz
+USER dmz
 EXPOSE 8787
 CMD ["greynoc-dmz", "dashboard", "--host", "0.0.0.0", "--port", "8787"]

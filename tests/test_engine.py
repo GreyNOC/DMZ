@@ -16,10 +16,34 @@ def test_auth_scenario_passes() -> None:
     assert result.fired_rules == ["GNOC-AUTH-001"]
 
 
+def test_run_scenario_resolves_telemetry_from_explicit_root() -> None:
+    result = run_scenario(
+        ROOT / "scenarios" / "auth-bruteforce-sim.json",
+        ROOT / "detections" / "rules",
+        telemetry_root=ROOT,
+    )
+
+    assert result.passed is True
+    assert result.fired_rules == ["GNOC-AUTH-001"]
+
+
 def test_all_scenarios_pass() -> None:
     results = validate_all(ROOT)
     assert results
     assert all(result.passed for result in results)
+
+
+def test_validate_all_without_persist_writes_nothing(tmp_path: Path) -> None:
+    import shutil
+
+    for name in ("detections", "scenarios", "telemetry", "runbooks", "configs"):
+        shutil.copytree(ROOT / name, tmp_path / name)
+
+    results = validate_all(tmp_path, persist=False)
+
+    assert results
+    assert not (tmp_path / ".dmz").exists()
+    assert not (tmp_path / "evidence").exists()
 
 
 def test_threshold_respects_window() -> None:
