@@ -10,6 +10,7 @@ GreyNOC DMZ is local-first by default. Before using it in a shared environment, 
 - Restrict network access to trusted operators.
 - Keep generated evidence and history out of git.
 - Run `greynoc-dmz security-check` before every merge.
+- Run `greynoc-dmz lint` before every merge.
 - Run `greynoc-dmz validate-all` before every release.
 - Use synthetic telemetry unless a real system is approved in writing.
 
@@ -20,11 +21,15 @@ Do not expose the built-in Python dashboard directly to the public internet. It 
 ## Current controls
 
 - Local optional authentication
-- Session cookies
+- Session cookies with server-side expiry purging
 - Basic browser security headers
+- Read-only dashboard (GET requests never write evidence or history)
 - Static HTML dashboard
+- Non-root container image
 - Synthetic telemetry fixtures
 - Security marker scan
+- Rule and scenario linting
+- MITRE ATT&CK coverage analysis
 - CI validation
 - Scheduled DMZ bot workflow
 
@@ -46,5 +51,7 @@ ruff check .
 mypy src
 pytest
 greynoc-dmz security-check
+greynoc-dmz lint
+greynoc-dmz integration-check
 greynoc-dmz validate-all
 ```
