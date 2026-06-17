@@ -6,12 +6,13 @@ from pathlib import Path
 from .models import ScenarioResult
 
 
-def render_result_markdown(result: ScenarioResult) -> str:
+def render_result_markdown(result: ScenarioResult, generated_at: datetime | None = None) -> str:
+    stamp = generated_at if generated_at is not None else datetime.now(UTC)
     status = "PASS" if result.passed else "FAIL"
     lines = [
         f"# GreyNOC DMZ Scenario Report: {result.scenario_name}",
         "",
-        f"Generated: {datetime.now(UTC).isoformat()}",
+        f"Generated: {stamp.isoformat()}",
         f"Scenario ID: `{result.scenario_id}`",
         f"Status: `{status}`",
         "",
@@ -46,8 +47,10 @@ def render_result_markdown(result: ScenarioResult) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def write_report(result: ScenarioResult, output_dir: Path) -> Path:
+def write_report(
+    result: ScenarioResult, output_dir: Path, generated_at: datetime | None = None
+) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"{result.scenario_id}.md"
-    path.write_text(render_result_markdown(result), encoding="utf-8")
+    path.write_text(render_result_markdown(result, generated_at), encoding="utf-8")
     return path

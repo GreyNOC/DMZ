@@ -62,7 +62,7 @@ def scan_repo(root: Path) -> list[SecurityFinding]:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        relative = str(path.relative_to(root))
+        relative = path.relative_to(root).as_posix()
         if _should_skip(path, relative):
             continue
 

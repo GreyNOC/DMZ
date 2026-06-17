@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .ai_battle import simulate_battle
+from .config import load_lab_config
 from .dashboard import serve
 from .engine import run_scenario, validate_all
 from .integrations import check_integration_config, default_integrations
@@ -29,14 +30,16 @@ def run_scenario_cmd(
     write_markdown_report: Annotated[bool, typer.Option("--report/--no-report")] = True,
 ) -> None:
     root = _root()
+    config = load_lab_config(root)
     result = run_scenario(
         scenario,
         root / "detections" / "rules",
-        root / "evidence" if write_evidence else None,
+        root / config.evidence_dir if write_evidence else None,
         root / ".dmz",
+        telemetry_root=root,
     )
     if write_markdown_report:
-        report_path = write_report(result, root / "reports")
+        report_path = write_report(result, root / config.report_dir)
         console.print(f"report: {report_path}")
     console.print(f"{result.scenario_id}: {'PASS' if result.passed else 'FAIL'}")
     if not result.passed:
@@ -45,7 +48,9 @@ def run_scenario_cmd(
 
 @app.command("validate-all")
 def validate_all_cmd() -> None:
-    results = validate_all(_root())
+    root = _root()
+    config = load_lab_config(root)
+    results = validate_all(root)
     table = Table(title="GreyNOC DMZ Validation")
     table.add_column("Scenario")
     table.add_column("Status")
@@ -60,7 +65,7 @@ def validate_all_cmd() -> None:
             ", ".join(result.fired_rules) or "none",
             ", ".join(result.missing_rules) or "none",
         )
-        write_report(result, _root() / "reports")
+        write_report(result, root / config.report_dir)
     console.print(table)
     if failed:
         raise typer.Exit(code=1)

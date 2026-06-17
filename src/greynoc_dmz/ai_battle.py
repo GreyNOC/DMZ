@@ -94,7 +94,7 @@ def _clamp_rounds(rounds: int) -> int:
 
 
 def _stat(seed: str, offset: int) -> int:
-    digest = sha256(f"{seed}:{offset}".encode("utf-8")).hexdigest()
+    digest = sha256(f"{seed}:{offset}".encode()).hexdigest()
     return 45 + (int(digest[:8], 16) % 51)
 
 
@@ -133,7 +133,7 @@ def build_ai_profile(name: str, strategy: str = "balanced") -> AiProfile:
 def _round_score(profile: AiProfile, opponent: AiProfile, objective: str, round_number: int) -> int:
     objective_seed = objective.lower().strip() or "dominance"
     digest = sha256(
-        f"{profile.name}:{opponent.name}:{objective_seed}:{round_number}".encode("utf-8")
+        f"{profile.name}:{opponent.name}:{objective_seed}:{round_number}".encode()
     ).hexdigest()
     pressure = int(digest[:6], 16) % 17
     challenge_bias = round_number % 3

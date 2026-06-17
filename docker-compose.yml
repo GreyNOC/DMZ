@@ -6,5 +6,3 @@ services:
     volumes:
       - ./reports:/app/reports
       - ./evidence:/app/evidence
-    environment:
-      GREYNOC_DMZ_ROOT: /app

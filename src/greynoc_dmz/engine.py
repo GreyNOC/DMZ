@@ -5,6 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from .config import load_lab_config
 from .io import load_events, load_rules, load_scenario, write_json
 from .models import Alert, DetectionRule, ScenarioResult, TelemetryEvent
 from .store import append_history
@@ -83,10 +84,12 @@ def run_scenario(
     rule_dir: Path,
     evidence_dir: Path | None = None,
     history_dir: Path | None = None,
+    telemetry_root: Path | None = None,
 ) -> ScenarioResult:
     scenario = load_scenario(scenario_path)
     rules = load_rules(rule_dir)
-    telemetry_path = scenario_path.parent.parent / scenario.telemetry_file
+    base = telemetry_root if telemetry_root is not None else scenario_path.parent.parent
+    telemetry_path = base / scenario.telemetry_file
     events = load_events(telemetry_path)
     alerts = run_rules(events, rules)
 
@@ -115,8 +118,12 @@ def run_scenario(
 
 
 def validate_all(root: Path) -> list[ScenarioResult]:
+    config = load_lab_config(root)
+    rule_dir = root / "detections" / "rules"
+    evidence_dir = root / config.evidence_dir
+    history_dir = root / ".dmz"
     scenario_paths = sorted((root / "scenarios").glob("*.json"))
     return [
-        run_scenario(path, root / "detections" / "rules", root / "evidence", root / ".dmz")
+        run_scenario(path, rule_dir, evidence_dir, history_dir, telemetry_root=root)
         for path in scenario_paths
     ]

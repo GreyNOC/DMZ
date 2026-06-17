@@ -53,8 +53,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/ai-battle":
             params = parse_qs(parsed.query)
-            result = _battle_from_params(params)
-            self._send_html(render_ai_battle(result))
+            battle = _battle_from_params(params)
+            self._send_html(render_ai_battle(battle))
             return
         if parsed.path == "/api/ai-battle":
             params = parse_qs(parsed.query)

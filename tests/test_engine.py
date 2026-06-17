@@ -16,6 +16,17 @@ def test_auth_scenario_passes() -> None:
     assert result.fired_rules == ["GNOC-AUTH-001"]
 
 
+def test_run_scenario_resolves_telemetry_from_explicit_root() -> None:
+    result = run_scenario(
+        ROOT / "scenarios" / "auth-bruteforce-sim.json",
+        ROOT / "detections" / "rules",
+        telemetry_root=ROOT,
+    )
+
+    assert result.passed is True
+    assert result.fired_rules == ["GNOC-AUTH-001"]
+
+
 def test_all_scenarios_pass() -> None:
     results = validate_all(ROOT)
     assert results
