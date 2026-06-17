@@ -45,6 +45,7 @@ def _lint_match(rule: DetectionRule, findings: list[LintFinding]) -> None:
 
 def _lint_rules(root: Path, findings: list[LintFinding]) -> set[str]:
     rule_dir = root / "detections" / "rules"
+    test_dir = root / "detections" / "tests"
     seen: dict[str, str] = {}
     valid_ids: set[str] = set()
 
@@ -78,6 +79,8 @@ def _lint_rules(root: Path, findings: list[LintFinding]) -> set[str]:
             findings.append(LintFinding(rule.id, ERROR, "threshold must be >= 1"))
         if rule.window_minutes < 1:
             findings.append(LintFinding(rule.id, ERROR, "window_minutes must be >= 1"))
+        if not (test_dir / f"{rule.id}.json").exists():
+            findings.append(LintFinding(rule.id, WARNING, "no rule test file"))
 
     return valid_ids
 

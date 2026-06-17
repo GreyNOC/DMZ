@@ -34,6 +34,7 @@ python -m pip install -e '.[dev]'
 
 greynoc-dmz security-check
 greynoc-dmz lint
+greynoc-dmz test-rules
 greynoc-dmz integration-check
 greynoc-dmz validate-all
 greynoc-dmz coverage
@@ -80,6 +81,7 @@ Do not expose this dashboard directly to the internet. Put a real reverse proxy,
 .github/workflows/           CI and scheduled DMZ bot workflow
 apps/dashboard/              Dashboard notes and static assets
 detections/rules/            Detection rules
+detections/tests/            Per-rule true-positive / true-negative test cases
 docs/                        Design notes, operating guides, readiness checklist
 evidence/                    Generated evidence, ignored by git
 infra/local-lab/             Local lab notes
@@ -168,6 +170,28 @@ build.
 ```bash
 greynoc-dmz lint
 ```
+
+## Detection-as-code testing
+
+Every rule ships with a test case under `detections/tests/<RULE-ID>.json` holding
+`true_positive` and `true_negative` events. `greynoc-dmz test-rules` replays each
+case against its rule and fails when a true-positive does not fire or a
+true-negative does. This is how a rule proves it both catches what it should and
+stays quiet on what it should not.
+
+```bash
+greynoc-dmz test-rules
+```
+
+```json
+{
+  "rule_id": "GNOC-EXEC-001",
+  "true_positive": [ { "event_type": "process_event", "message": "powershell -enc SQBFAFgA", "...": "..." } ],
+  "true_negative": [ { "event_type": "process_event", "message": "powershell Get-ChildItem", "...": "..." } ]
+}
+```
+
+`lint` warns when a rule has no test file, and `test-rules` runs as a CI gate.
 
 ## Integrations
 
@@ -260,6 +284,7 @@ mypy src
 pytest
 greynoc-dmz security-check
 greynoc-dmz lint
+greynoc-dmz test-rules
 greynoc-dmz integration-check
 greynoc-dmz validate-all
 ```

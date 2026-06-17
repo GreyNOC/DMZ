@@ -15,6 +15,7 @@ from .engine import run_scenario, validate_all
 from .integrations import check_integration_config, default_integrations
 from .lint import has_errors, lint_repo
 from .reporting import write_report
+from .ruletest import has_failures, run_rule_tests
 from .security import scan_repo
 
 app = typer.Typer(help="GreyNOC DMZ detection validation CLI")
@@ -145,6 +146,24 @@ def lint_cmd() -> None:
         table.add_row(finding.target, finding.level, finding.message)
     console.print(table)
     if has_errors(findings):
+        raise typer.Exit(code=1)
+
+
+@app.command("test-rules")
+def test_rules_cmd() -> None:
+    results = run_rule_tests(_root())
+    if not results:
+        console.print("test-rules: no rule tests found")
+        return
+
+    table = Table(title="GreyNOC DMZ Rule Tests")
+    table.add_column("Rule")
+    table.add_column("Status")
+    table.add_column("Detail")
+    for result in results:
+        table.add_row(result.rule_id, "PASS" if result.passed else "FAIL", result.detail)
+    console.print(table)
+    if has_failures(results):
         raise typer.Exit(code=1)
 
 
