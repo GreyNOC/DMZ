@@ -218,7 +218,15 @@ The dashboard is local-first and read-only: `GET` requests recompute results in 
 
 ## Role model
 
-The role model defines `viewer`, `analyst`, `engineer`, and `admin`. Future write routes should check the permission map in `src/greynoc_dmz/access.py`.
+The role model defines `viewer`, `analyst`, `engineer`, and `admin` in
+`src/greynoc_dmz/access.py`. When authentication is enabled, the dashboard
+enforces the permission map per route:
+
+- `viewer` and `analyst` see scenario status and detail (`/`, `/scenario`, `/api/status`)
+- `engineer` and `admin` additionally reach the detection tooling (`/coverage`, `/ai-battle` and their APIs)
+
+Routes a role lacks permission for return `403`. When authentication is
+disabled for local development, requests run with the `admin` role.
 
 ## Rule format
 

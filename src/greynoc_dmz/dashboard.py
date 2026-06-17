@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .access import Role, can
 from .ai_battle import BattleResult, simulate_battle
 from .auth import (
     AuthConfig,
@@ -20,6 +21,20 @@ from .coverage import CoverageReport, coverage_for_root
 from .engine import validate_all
 from .models import ScenarioResult
 from .store import read_history
+
+# Minimum permission required to reach each route. Read-only viewers and
+# analysts can see scenario status; the detection tooling (coverage map, AI
+# battle) requires an engineer or admin role.
+ROUTE_PERMISSIONS: dict[str, str] = {
+    "/": "dashboard:read",
+    "/index.html": "dashboard:read",
+    "/api/status": "dashboard:read",
+    "/scenario": "scenario:read",
+    "/coverage": "rule:read",
+    "/api/coverage": "rule:read",
+    "/ai-battle": "rule:test",
+    "/api/ai-battle": "rule:test",
+}
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -39,6 +54,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if not self._is_authorized():
             self._redirect("/login")
+            return
+        required = ROUTE_PERMISSIONS.get(parsed.path)
+        if required is not None and not self._has_permission(required):
+            self.send_error(403, "insufficient role")
             return
         if parsed.path in {"/", "/index.html"}:
             self._send_html(
@@ -78,9 +97,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             results = validate_all(self.root, persist=False)
             coverage = coverage_for_root(self.root)
             covered, total = coverage.tactic_coverage_ratio
+            role = self._effective_role()
             payload = {
                 "app": "GreyNOC DMZ",
                 "auth_enabled": self.auth_config.enabled,
+                "role": role.value if role else None,
                 "scenario_count": len(results),
                 "passing": sum(1 for item in results if item.passed),
                 "failing": sum(1 for item in results if not item.passed),
@@ -115,6 +136,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return True
         token = parse_cookie(self.headers.get("Cookie"))
         return self.sessions.get(token) is not None
+
+    def _effective_role(self) -> Role | None:
+        if not self.auth_config.enabled:
+            return Role.admin
+        token = parse_cookie(self.headers.get("Cookie"))
+        session = self.sessions.get(token)
+        return session.role if session else None
+
+    def _has_permission(self, permission: str) -> bool:
+        role = self._effective_role()
+        return role is not None and can(role, permission)
 
     def _redirect(self, location: str, cookie: str | None = None, clear_cookie: bool = False) -> None:
         self.send_response(302)
