@@ -16,6 +16,7 @@ from .auth import (
     parse_cookie,
     verify_login,
 )
+from .coverage import CoverageReport, coverage_for_root
 from .engine import validate_all
 from .models import ScenarioResult
 from .store import read_history
@@ -40,11 +41,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._redirect("/login")
             return
         if parsed.path in {"/", "/index.html"}:
-            self._send_html(render_dashboard(validate_all(self.root), read_history(self.root / ".dmz"), self.auth_config.enabled))
+            self._send_html(
+                render_dashboard(
+                    validate_all(self.root, persist=False),
+                    read_history(self.root / ".dmz"),
+                    coverage_for_root(self.root),
+                    self.auth_config.enabled,
+                )
+            )
+            return
+        if parsed.path == "/coverage":
+            self._send_html(render_coverage(coverage_for_root(self.root)))
+            return
+        if parsed.path == "/api/coverage":
+            self._send_json(coverage_for_root(self.root).to_dict())
             return
         if parsed.path == "/scenario":
             scenario_id = parse_qs(parsed.query).get("id", [""])[0]
-            results = validate_all(self.root)
+            results = validate_all(self.root, persist=False)
             result = next((item for item in results if item.scenario_id == scenario_id), None)
             if result is None:
                 self.send_error(404)
@@ -61,15 +75,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(_battle_from_params(params).to_dict())
             return
         if parsed.path == "/api/status":
-            results = validate_all(self.root)
+            results = validate_all(self.root, persist=False)
+            coverage = coverage_for_root(self.root)
+            covered, total = coverage.tactic_coverage_ratio
             payload = {
                 "app": "GreyNOC DMZ",
                 "auth_enabled": self.auth_config.enabled,
                 "scenario_count": len(results),
                 "passing": sum(1 for item in results if item.passed),
                 "failing": sum(1 for item in results if not item.passed),
+                "tactic_coverage": f"{covered}/{total}",
                 "results": [item.model_dump(mode="json") for item in results],
                 "ai_battle_api": "/api/ai-battle",
+                "coverage_api": "/api/coverage",
             }
             self._send_json(payload)
             return
@@ -197,7 +215,7 @@ def _page(title: str, body: str) -> str:
   <div class="desktop">
     <div class="window">
       <div class="titlebar"><span>{html.escape(title)}</span><span class="controls"><span>_</span><span>[]</span><span>X</span></span></div>
-      <div class="menu"><a href="/">Scenarios</a><a href="/ai-battle">AI Battle</a><a href="/api/status">API</a><a href="/logout">Logout</a></div>
+      <div class="menu"><a href="/">Scenarios</a><a href="/coverage">Coverage</a><a href="/ai-battle">AI Battle</a><a href="/api/status">API</a><a href="/logout">Logout</a></div>
       <div class="content">{body}</div>
       <div class="footer">GreyNOC DMZ local detection manager</div>
     </div>
@@ -226,7 +244,12 @@ def render_login(error: str | None) -> str:
     )
 
 
-def render_dashboard(results: list[ScenarioResult], history: list[dict[str, object]], auth_enabled: bool) -> str:
+def render_dashboard(
+    results: list[ScenarioResult],
+    history: list[dict[str, object]],
+    coverage: CoverageReport,
+    auth_enabled: bool,
+) -> str:
     rows = []
     passed = 0
     total = 0
@@ -262,6 +285,7 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
         )
 
     auth_label = "enabled" if auth_enabled else "disabled"
+    covered, total_tactics = coverage.tactic_coverage_ratio
     body = f"""
         <div class="panel">
           <div class="grid">
@@ -270,6 +294,10 @@ def render_dashboard(results: list[ScenarioResult], history: list[dict[str, obje
             <div class="metric">Failing<b>{total - passed}</b></div>
             <div class="metric">Alerts<b>{alert_count}</b></div>
           </div>
+        </div>
+        <div class="panel">
+          <h3>MITRE ATT&amp;CK coverage</h3>
+          <p>Tactics covered: <b>{covered}/{total_tactics}</b>. <a href="/coverage">View coverage map</a> or call <code>/api/coverage</code>.</p>
         </div>
         <div class="panel">
           <h3>AI Battle Arena</h3>
@@ -342,6 +370,50 @@ def render_ai_battle(result: BattleResult) -> str:
       <div class="panel">JSON API: <code>/api/ai-battle?one={html.escape(result.ai_one.name)}&amp;two={html.escape(result.ai_two.name)}&amp;rounds={len(result.rounds)}</code></div>
     """
     return _page("GreyNOC DMZ - AI Battle", body)
+
+
+def render_coverage(coverage: CoverageReport) -> str:
+    covered, total = coverage.tactic_coverage_ratio
+    tactic_rows = []
+    for tactic in coverage.tactics:
+        label = "PASS" if tactic.covered else "FAIL"
+        status_text = "covered" if tactic.covered else "gap"
+        tactic_rows.append(
+            "<tr>"
+            f"<td>{html.escape(tactic.tactic_id)}</td>"
+            f"<td>{html.escape(tactic.name)}</td>"
+            f"<td><span class='status {label.lower()}'>{status_text}</span></td>"
+            f"<td>{html.escape(', '.join(tactic.rule_ids) or 'none')}</td>"
+            "</tr>"
+        )
+
+    technique_rows = [
+        "<tr>"
+        f"<td>{html.escape(technique)}</td>"
+        f"<td>{html.escape(', '.join(rule_ids))}</td>"
+        "</tr>"
+        for technique, rule_ids in coverage.techniques.items()
+    ]
+
+    unmapped = html.escape(", ".join(coverage.unmapped_rules) or "none")
+    body = f"""
+      <div class="panel">
+        <h3>MITRE ATT&amp;CK tactic coverage ({covered}/{total})</h3>
+        <table>
+          <thead><tr><th>Tactic</th><th>Name</th><th>Status</th><th>Rules</th></tr></thead>
+          <tbody>{''.join(tactic_rows)}</tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Techniques mapped</h3>
+        <table>
+          <thead><tr><th>Technique</th><th>Rules</th></tr></thead>
+          <tbody>{''.join(technique_rows) or '<tr><td colspan="2">No techniques mapped.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="panel">Rules without a MITRE mapping: <code>{unmapped}</code>. JSON API: <code>/api/coverage</code></div>
+    """
+    return _page("GreyNOC DMZ - Coverage", body)
 
 
 def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:

@@ -33,8 +33,10 @@ python -m venv .venv
 python -m pip install -e '.[dev]'
 
 greynoc-dmz security-check
+greynoc-dmz lint
 greynoc-dmz integration-check
 greynoc-dmz validate-all
+greynoc-dmz coverage
 
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
 ```
@@ -134,6 +136,39 @@ http://127.0.0.1:8787/api/ai-battle?one=Sentinel&two=Phantom&rounds=5&one_strate
 
 This feature is intentionally synthetic. It does not launch tools, attack systems, or run autonomous offensive activity.
 
+## MITRE ATT&CK coverage
+
+`greynoc-dmz coverage` maps every detection rule onto the enterprise ATT&CK tactic
+list and reports which tactics are covered and which are gaps. Technique IDs are
+listed separately, and any rule without a MITRE mapping is flagged.
+
+```bash
+greynoc-dmz coverage
+```
+
+The same data is available in the dashboard at `/coverage` and as JSON at
+`/api/coverage`. The main dashboard and `/api/status` show the tactic coverage
+ratio at a glance.
+
+## Rule linting
+
+`greynoc-dmz lint` validates detections and scenarios as code before they ship:
+
+- every rule loads and validates against the schema
+- rule ids are unique
+- linked runbooks exist on disk
+- MITRE ids are well formed (`TA####` or `T####[.###]`)
+- thresholds and windows are sane
+- scenarios only reference rules that exist, with telemetry that exists
+
+It exits non-zero on any `error`-level finding, so it runs in CI as a gate.
+`warning`-level findings (such as a rule with no MITRE mapping) do not fail the
+build.
+
+```bash
+greynoc-dmz lint
+```
+
 ## Integrations
 
 The first integration pass is vendor-neutral. It adds connector types and readiness checks for:
@@ -153,9 +188,9 @@ The current command checks built-in placeholder connectors and reports whether t
 
 ## Dashboard
 
-The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, rule coverage, recent validation history, scenario detail pages, and the AI battle arena.
+The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, MITRE ATT&CK tactic coverage, recent validation history, scenario detail pages, a coverage map, and the AI battle arena.
 
-The dashboard is local-first. It serves static HTML and small JSON endpoints. It also sets basic browser security headers.
+The dashboard is local-first and read-only: `GET` requests recompute results in memory but never write evidence or history. It serves static HTML and small JSON endpoints, and sets basic browser security headers.
 
 ## Role model
 
@@ -199,6 +234,7 @@ ruff check .
 mypy src
 pytest
 greynoc-dmz security-check
+greynoc-dmz lint
 greynoc-dmz integration-check
 greynoc-dmz validate-all
 ```

@@ -33,6 +33,19 @@ def test_all_scenarios_pass() -> None:
     assert all(result.passed for result in results)
 
 
+def test_validate_all_without_persist_writes_nothing(tmp_path: Path) -> None:
+    import shutil
+
+    for name in ("detections", "scenarios", "telemetry", "runbooks", "configs"):
+        shutil.copytree(ROOT / name, tmp_path / name)
+
+    results = validate_all(tmp_path, persist=False)
+
+    assert results
+    assert not (tmp_path / ".dmz").exists()
+    assert not (tmp_path / "evidence").exists()
+
+
 def test_threshold_respects_window() -> None:
     rule = DetectionRule(
         id="GNOC-TEST-001",

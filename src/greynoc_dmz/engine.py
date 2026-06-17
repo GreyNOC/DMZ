@@ -117,11 +117,11 @@ def run_scenario(
     return result
 
 
-def validate_all(root: Path) -> list[ScenarioResult]:
+def validate_all(root: Path, persist: bool = True) -> list[ScenarioResult]:
     config = load_lab_config(root)
     rule_dir = root / "detections" / "rules"
-    evidence_dir = root / config.evidence_dir
-    history_dir = root / ".dmz"
+    evidence_dir = root / config.evidence_dir if persist else None
+    history_dir = root / ".dmz" if persist else None
     scenario_paths = sorted((root / "scenarios").glob("*.json"))
     return [
         run_scenario(path, rule_dir, evidence_dir, history_dir, telemetry_root=root)

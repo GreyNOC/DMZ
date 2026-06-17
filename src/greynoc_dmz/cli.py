@@ -9,9 +9,11 @@ from rich.table import Table
 
 from .ai_battle import simulate_battle
 from .config import load_lab_config
+from .coverage import coverage_for_root
 from .dashboard import serve
 from .engine import run_scenario, validate_all
 from .integrations import check_integration_config, default_integrations
+from .lint import has_errors, lint_repo
 from .reporting import write_report
 from .security import scan_repo
 
@@ -103,6 +105,47 @@ def ai_battle_cmd(
     console.print(f"{result.ai_two.name}: {result.ai_two_total}")
     console.print(f"winner: {result.winner}")
     console.print(result.summary)
+
+
+@app.command("coverage")
+def coverage_cmd() -> None:
+    report = coverage_for_root(_root())
+    covered, total = report.tactic_coverage_ratio
+
+    table = Table(title=f"GreyNOC DMZ MITRE ATT&CK Coverage ({covered}/{total} tactics)")
+    table.add_column("Tactic")
+    table.add_column("Name")
+    table.add_column("Status")
+    table.add_column("Rules")
+    for tactic in report.tactics:
+        table.add_row(
+            tactic.tactic_id,
+            tactic.name,
+            "covered" if tactic.covered else "gap",
+            ", ".join(tactic.rule_ids) or "none",
+        )
+    console.print(table)
+    console.print(f"techniques mapped: {', '.join(report.techniques) or 'none'}")
+    if report.unmapped_rules:
+        console.print(f"rules without MITRE mapping: {', '.join(report.unmapped_rules)}")
+
+
+@app.command("lint")
+def lint_cmd() -> None:
+    findings = lint_repo(_root())
+    if not findings:
+        console.print("lint: PASS")
+        return
+
+    table = Table(title="GreyNOC DMZ Rule Lint")
+    table.add_column("Target")
+    table.add_column("Level")
+    table.add_column("Message")
+    for finding in findings:
+        table.add_row(finding.target, finding.level, finding.message)
+    console.print(table)
+    if has_errors(findings):
+        raise typer.Exit(code=1)
 
 
 @app.command("integration-check")
