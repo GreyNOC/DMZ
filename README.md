@@ -193,6 +193,15 @@ greynoc-dmz test-rules
 
 `lint` warns when a rule has no test file, and `test-rules` runs as a CI gate.
 
+## Incidents and detection latency
+
+Alerts carry a `dwell_seconds` value (the span from first to last event) as a
+detection-latency proxy. Reports and the scenario detail page correlate alerts
+by host into incidents, each showing the combined max severity, the rules that
+fired, the ATT&CK tactics and techniques involved, total alerts and events, and
+the incident dwell time. This turns a flat alert list into a per-host kill-chain
+view.
+
 ## Integrations
 
 The first integration pass is vendor-neutral. It adds connector types and readiness checks for:

@@ -17,6 +17,7 @@ from .auth import (
     parse_cookie,
     verify_login,
 )
+from .correlation import correlate
 from .coverage import CoverageReport, coverage_for_root
 from .engine import validate_all
 from .models import ScenarioResult
@@ -460,7 +461,21 @@ def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
             f"<td>{html.escape(alert.host)}</td>"
             f"<td>{html.escape(alert.user or 'n/a')}</td>"
             f"<td>{alert.event_count}</td>"
+            f"<td>{alert.dwell_seconds:.0f}s</td>"
             f"<td>{html.escape(alert.runbook or 'n/a')}</td>"
+            "</tr>"
+        )
+
+    incident_rows = []
+    for incident in correlate(result.alerts):
+        incident_rows.append(
+            "<tr>"
+            f"<td>{html.escape(incident.host)}</td>"
+            f"<td>{html.escape(incident.severity.value)}</td>"
+            f"<td>{html.escape(', '.join(incident.rule_ids))}</td>"
+            f"<td>{html.escape(', '.join(incident.tactics) or 'none')}</td>"
+            f"<td>{incident.alert_count}</td>"
+            f"<td>{incident.dwell_seconds:.0f}s</td>"
             "</tr>"
         )
     body = f"""
@@ -478,10 +493,17 @@ def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
         </table>
       </div>
       <div class="panel">
+        <h3>Incidents</h3>
+        <table>
+          <thead><tr><th>Host</th><th>Severity</th><th>Rules</th><th>Tactics</th><th>Alerts</th><th>Dwell</th></tr></thead>
+          <tbody>{''.join(incident_rows) or '<tr><td colspan="6">No incidents.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="panel">
         <h3>Alerts</h3>
         <table>
-          <thead><tr><th>Rule</th><th>Name</th><th>Severity</th><th>Host</th><th>User</th><th>Events</th><th>Runbook</th></tr></thead>
-          <tbody>{''.join(alert_rows) or '<tr><td colspan="7">No alerts fired.</td></tr>'}</tbody>
+          <thead><tr><th>Rule</th><th>Name</th><th>Severity</th><th>Host</th><th>User</th><th>Events</th><th>Dwell</th><th>Runbook</th></tr></thead>
+          <tbody>{''.join(alert_rows) or '<tr><td colspan="8">No alerts fired.</td></tr>'}</tbody>
         </table>
       </div>
     """

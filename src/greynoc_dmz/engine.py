@@ -52,6 +52,8 @@ def run_rules(events: list[TelemetryEvent], rules: list[DetectionRule]) -> list[
             evidence = _threshold_window(group, rule.threshold, rule.window_minutes)
             if evidence is None:
                 continue
+            first_seen = evidence[0].timestamp
+            last_seen = evidence[-1].timestamp
             alerts.append(
                 Alert(
                     rule_id=rule.id,
@@ -60,8 +62,9 @@ def run_rules(events: list[TelemetryEvent], rules: list[DetectionRule]) -> list[
                     host=host,
                     user=user,
                     event_count=len(evidence),
-                    first_seen=evidence[0].timestamp,
-                    last_seen=evidence[-1].timestamp,
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                    dwell_seconds=(last_seen - first_seen).total_seconds(),
                     evidence=evidence,
                     runbook=rule.runbook,
                     mitre=rule.mitre,
