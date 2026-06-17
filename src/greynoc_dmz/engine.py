@@ -3,20 +3,14 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 from .config import load_lab_config
 from .io import load_events, load_rules, load_scenario, write_json
+from .matching import value_matches
 from .models import Alert, DetectionRule, ScenarioResult, TelemetryEvent
 from .store import append_history
 
-
-def _value_matches(actual: Any, expected: Any) -> bool:
-    if isinstance(expected, list):
-        return actual in expected
-    if isinstance(actual, str) and isinstance(expected, str):
-        return expected.lower() in actual.lower()
-    return bool(actual == expected)
+_EVENT_ATTRIBUTES = {"message", "source", "host", "user", "ip", "event_type"}
 
 
 def event_matches_rule(event: TelemetryEvent, rule: DetectionRule) -> bool:
@@ -24,11 +18,8 @@ def event_matches_rule(event: TelemetryEvent, rule: DetectionRule) -> bool:
         return False
 
     for key, expected in rule.match.items():
-        if key in {"message", "source", "host", "user", "ip", "event_type"}:
-            actual = getattr(event, key)
-        else:
-            actual = event.fields.get(key)
-        if not _value_matches(actual, expected):
+        actual = getattr(event, key) if key in _EVENT_ATTRIBUTES else event.fields.get(key)
+        if not value_matches(actual, expected):
             return False
     return True
 

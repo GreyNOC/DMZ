@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .io import read_json
+from .matching import OPERATORS
 from .models import DetectionRule, Scenario
 
 ERROR = "error"
@@ -21,6 +22,25 @@ class LintFinding:
     target: str
     level: str
     message: str
+
+
+def _lint_match(rule: DetectionRule, findings: list[LintFinding]) -> None:
+    for field, expected in rule.match.items():
+        if not (isinstance(expected, dict) and "op" in expected):
+            continue
+        op = str(expected["op"]).lower()
+        if op not in OPERATORS:
+            findings.append(LintFinding(rule.id, ERROR, f"unknown match operator {op!r} on {field}"))
+            continue
+        if op == "regex":
+            value = expected.get("value")
+            if not isinstance(value, str):
+                findings.append(LintFinding(rule.id, ERROR, f"regex on {field} needs a string value"))
+                continue
+            try:
+                re.compile(value)
+            except re.error as exc:
+                findings.append(LintFinding(rule.id, ERROR, f"invalid regex on {field}: {exc}"))
 
 
 def _lint_rules(root: Path, findings: list[LintFinding]) -> set[str]:
@@ -49,6 +69,7 @@ def _lint_rules(root: Path, findings: list[LintFinding]) -> set[str]:
             if not MITRE_RE.fullmatch(token.strip().upper()):
                 findings.append(LintFinding(rule.id, ERROR, f"malformed MITRE id: {token!r}"))
 
+        _lint_match(rule, findings)
         if rule.runbook and not (root / rule.runbook).exists():
             findings.append(LintFinding(rule.id, ERROR, f"runbook not found: {rule.runbook}"))
         if not rule.runbook:

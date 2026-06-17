@@ -217,6 +217,31 @@ Rules are JSON files under `detections/rules/`.
 
 Threshold rules are window-aware. A rule with `threshold: 5` and `window_minutes: 10` only fires when five matching events occur inside the configured window.
 
+### Match expressions
+
+Each entry in `match` is checked against an event attribute (`message`, `source`,
+`host`, `user`, `ip`, `event_type`) or, otherwise, against a key in the event's
+`fields`. A match value can be:
+
+- a string — case-insensitive substring (`contains`)
+- a list — membership (`in`)
+- an object `{ "op": ..., "value": ..., "negate": false }` for structured matching
+
+Supported operators: `equals`/`eq`, `contains`, `startswith`, `endswith`,
+`regex`, `in`, and the numeric comparisons `gt`, `gte`, `lt`, `lte` (which coerce
+strings to numbers). Set `"negate": true` to invert any operator.
+
+```json
+"match": {
+  "path": { "op": "regex", "value": "union\\s+select" },
+  "status": { "op": "gte", "value": 400 },
+  "user": { "op": "equals", "value": "service-account", "negate": true }
+}
+```
+
+`greynoc-dmz lint` validates operator names and compiles every regex, so a broken
+match expression fails CI instead of silently never firing.
+
 ## Security checks
 
 Run this before each commit:

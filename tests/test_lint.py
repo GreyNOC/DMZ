@@ -41,6 +41,31 @@ def test_lint_flags_missing_runbook(tmp_path: Path) -> None:
     assert any("runbook not found" in f.message for f in findings)
 
 
+def test_lint_flags_invalid_regex_operator(tmp_path: Path) -> None:
+    root = _lab(tmp_path)
+    _write_rule(
+        root / "detections" / "rules" / "r.json",
+        match={"path": {"op": "regex", "value": "("}},
+    )
+
+    findings = lint_repo(root)
+
+    assert has_errors(findings)
+    assert any("invalid regex" in f.message for f in findings)
+
+
+def test_lint_flags_unknown_match_operator(tmp_path: Path) -> None:
+    root = _lab(tmp_path)
+    _write_rule(
+        root / "detections" / "rules" / "r.json",
+        match={"path": {"op": "matches", "value": "x"}},
+    )
+
+    findings = lint_repo(root)
+
+    assert any("unknown match operator" in f.message for f in findings)
+
+
 def test_lint_flags_scenario_referencing_unknown_rule(tmp_path: Path) -> None:
     root = _lab(tmp_path)
     _write_rule(root / "detections" / "rules" / "r.json")
