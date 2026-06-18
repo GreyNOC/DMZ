@@ -33,6 +33,8 @@ python -m venv .venv
 python -m pip install -e '.[dev]'
 
 greynoc-dmz security-check
+greynoc-dmz lint
+greynoc-dmz test-rules
 greynoc-dmz integration-check
 greynoc-dmz validate-all
 greynoc-dmz integration-publish
@@ -48,6 +50,12 @@ Run one scenario:
 
 ```bash
 greynoc-dmz run-scenario --scenario scenarios/auth-bruteforce-sim.json
+```
+
+Run two AI profiles against each other in a local synthetic dominance exercise:
+
+```bash
+greynoc-dmz ai-battle --ai-one Sentinel --ai-two Phantom --rounds 5 --ai-one-strategy balanced --ai-two-strategy adaptive
 ```
 
 Run with Docker:
@@ -75,6 +83,7 @@ Do not expose this dashboard directly to the internet. Put a real reverse proxy,
 .github/workflows/           CI and scheduled DMZ bot workflow
 apps/dashboard/              Dashboard notes and static assets
 detections/rules/            Detection rules
+detections/tests/            Per-rule true-positive / true-negative test cases
 docs/                        Design notes, operating guides, readiness checklist
 evidence/                    Generated evidence, ignored by git
 infra/local-lab/             Local lab notes
@@ -98,6 +107,102 @@ Generated local history is written under `.dmz/` and ignored by git.
 6. Save a local history record.
 7. Generate a report.
 8. Tune and retest.
+
+## AI battle arena
+
+The AI battle arena puts two named AI profiles into a deterministic local contest. Each profile gets generated tactical stats, chooses from safe SOC-style strategies, and competes across synthetic challenges such as telemetry triage, containment, evidence handling, rule adaptation, false-positive reduction, and recovery prioritization.
+
+Available strategies:
+
+- `balanced`
+- `aggressive`
+- `defensive`
+- `adaptive`
+- `analyst`
+
+CLI example:
+
+```bash
+greynoc-dmz ai-battle --ai-one Sentinel --ai-two Phantom --rounds 7 --objective "Own the SOC workflow without losing evidence"
+```
+
+Dashboard route:
+
+```text
+http://127.0.0.1:8787/ai-battle
+```
+
+JSON API example:
+
+```text
+http://127.0.0.1:8787/api/ai-battle?one=Sentinel&two=Phantom&rounds=5&one_strategy=balanced&two_strategy=adaptive
+```
+
+This feature is intentionally synthetic. It does not launch tools, attack systems, or run autonomous offensive activity.
+
+## MITRE ATT&CK coverage
+
+`greynoc-dmz coverage` maps every detection rule onto the enterprise ATT&CK tactic
+list and reports which tactics are covered and which are gaps. Technique IDs are
+listed separately, and any rule without a MITRE mapping is flagged.
+
+```bash
+greynoc-dmz coverage
+```
+
+The same data is available in the dashboard at `/coverage` and as JSON at
+`/api/coverage`. The main dashboard and `/api/status` show the tactic coverage
+ratio at a glance.
+
+## Rule linting
+
+`greynoc-dmz lint` validates detections and scenarios as code before they ship:
+
+- every rule loads and validates against the schema
+- rule ids are unique
+- linked runbooks exist on disk
+- MITRE ids are well formed (`TA####` or `T####[.###]`)
+- thresholds and windows are sane
+- scenarios only reference rules that exist, with telemetry that exists
+
+It exits non-zero on any `error`-level finding, so it runs in CI as a gate.
+`warning`-level findings (such as a rule with no MITRE mapping) do not fail the
+build.
+
+```bash
+greynoc-dmz lint
+```
+
+## Detection-as-code testing
+
+Every rule ships with a test case under `detections/tests/<RULE-ID>.json` holding
+`true_positive` and `true_negative` events. `greynoc-dmz test-rules` replays each
+case against its rule and fails when a true-positive does not fire or a
+true-negative does. This is how a rule proves it both catches what it should and
+stays quiet on what it should not.
+
+```bash
+greynoc-dmz test-rules
+```
+
+```json
+{
+  "rule_id": "GNOC-EXEC-001",
+  "true_positive": [ { "event_type": "process_event", "message": "powershell -enc SQBFAFgA", "...": "..." } ],
+  "true_negative": [ { "event_type": "process_event", "message": "powershell Get-ChildItem", "...": "..." } ]
+}
+```
+
+`lint` warns when a rule has no test file, and `test-rules` runs as a CI gate.
+
+## Incidents and detection latency
+
+Alerts carry a `dwell_seconds` value (the span from first to last event) as a
+detection-latency proxy. Reports and the scenario detail page correlate alerts
+by host into incidents, each showing the combined max severity, the rules that
+fired, the ATT&CK tactics and techniques involved, total alerts and events, and
+the incident dwell time. This turns a flat alert list into a per-host kill-chain
+view.
 
 ## Integrations
 
@@ -159,13 +264,21 @@ Generated datasets are written under `datasets/` and are not committed. See
 
 ## Dashboard
 
-The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, rule coverage, recent validation history, and scenario detail pages.
+The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, MITRE ATT&CK tactic coverage, recent validation history, scenario detail pages, a coverage map, and the AI battle arena.
 
-The dashboard is local-first. It serves static HTML and a small JSON status endpoint. It also sets basic browser security headers.
+The dashboard is local-first and read-only: `GET` requests recompute results in memory but never write evidence or history. It serves static HTML and small JSON endpoints, and sets basic browser security headers.
 
 ## Role model
 
-The role model defines `viewer`, `analyst`, `engineer`, and `admin`. Future write routes should check the permission map in `src/greynoc_dmz/access.py`.
+The role model defines `viewer`, `analyst`, `engineer`, and `admin` in
+`src/greynoc_dmz/access.py`. When authentication is enabled, the dashboard
+enforces the permission map per route:
+
+- `viewer` and `analyst` see scenario status and detail (`/`, `/scenario`, `/api/status`)
+- `engineer` and `admin` additionally reach the detection tooling (`/coverage`, `/ai-battle` and their APIs)
+
+Routes a role lacks permission for return `403`. When authentication is
+disabled for local development, requests run with the `admin` role.
 
 ## Rule format
 
@@ -188,6 +301,31 @@ Rules are JSON files under `detections/rules/`.
 
 Threshold rules are window-aware. A rule with `threshold: 5` and `window_minutes: 10` only fires when five matching events occur inside the configured window.
 
+### Match expressions
+
+Each entry in `match` is checked against an event attribute (`message`, `source`,
+`host`, `user`, `ip`, `event_type`) or, otherwise, against a key in the event's
+`fields`. A match value can be:
+
+- a string — case-insensitive substring (`contains`)
+- a list — membership (`in`)
+- an object `{ "op": ..., "value": ..., "negate": false }` for structured matching
+
+Supported operators: `equals`/`eq`, `contains`, `startswith`, `endswith`,
+`regex`, `in`, and the numeric comparisons `gt`, `gte`, `lt`, `lte` (which coerce
+strings to numbers). Set `"negate": true` to invert any operator.
+
+```json
+"match": {
+  "path": { "op": "regex", "value": "union\\s+select" },
+  "status": { "op": "gte", "value": 400 },
+  "user": { "op": "equals", "value": "service-account", "negate": true }
+}
+```
+
+`greynoc-dmz lint` validates operator names and compiles every regex, so a broken
+match expression fails CI instead of silently never firing.
+
 ## Security checks
 
 Run this before each commit:
@@ -205,6 +343,8 @@ ruff check .
 mypy src
 pytest
 greynoc-dmz security-check
+greynoc-dmz lint
+greynoc-dmz test-rules
 greynoc-dmz integration-check
 greynoc-dmz validate-all
 ```
