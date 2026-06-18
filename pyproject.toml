@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "greynoc-dmz"
-version = "0.4.2"
+version = "0.4.3"
 description = "GreyNOC DMZ detection validation lab"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,7 +29,7 @@ release = [
 ]
 
 [project.scripts]
-greynoc-dmz = "greynoc_dmz.cli:app"
+greynoc-dmz = "greynoc_dmz.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

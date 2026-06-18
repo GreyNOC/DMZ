@@ -83,6 +83,9 @@ Or run the portable executable directly:
 
 Double-clicking `greynoc-dmz.exe` opens the local dashboard and keeps a console
 window open with the dashboard URL. Close that window to stop the dashboard.
+On first portable launch, bundled lab files are copied into
+`%LOCALAPPDATA%\GreyNOC\DMZ\lab` so dashboard validation history, reports, and
+evidence persist across runs.
 
 ## Local authentication
 

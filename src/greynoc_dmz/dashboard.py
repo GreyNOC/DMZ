@@ -18,11 +18,13 @@ from .auth import (
     parse_cookie,
     verify_login,
 )
+from .config import load_lab_config
 from .correlation import correlate
 from .coverage import CoverageReport, coverage_for_root
 from .engine import validate_all
 from .integrations import IntegrationCheck, check_integration_config, load_integrations
 from .models import ScenarioResult
+from .reporting import write_report
 from .store import read_history
 
 # Minimum permission required to reach each route. Read-only viewers and
@@ -37,6 +39,7 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     "/api/coverage": "rule:read",
     "/ai-battle": "rule:test",
     "/api/ai-battle": "rule:test",
+    "/validate": "scenario:run",
 }
 
 
@@ -141,6 +144,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/validate":
+            if not self._is_authorized():
+                self._redirect("/login")
+                return
+            if not self._has_permission("scenario:run"):
+                self.send_error(403, "insufficient role")
+                return
+            config = load_lab_config(self.root)
+            for result in validate_all(self.root, persist=True):
+                write_report(result, self.root / config.report_dir)
+            self._redirect("/")
+            return
         if parsed.path != "/login":
             self.send_error(404)
             return
@@ -373,6 +388,11 @@ def render_dashboard(
     covered, total_tactics = coverage.tactic_coverage_ratio
     body = f"""
         <div class="panel">
+          <form method="post" action="/validate">
+            <button type="submit">Run Validation</button>
+          </form>
+        </div>
+        <div class="panel">
           <div class="grid">
             <div class="metric">Scenarios<b>{total}</b></div>
             <div class="metric">Passing<b>{passed}</b></div>
@@ -570,8 +590,8 @@ def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
       <div class="panel">
         <h3>Alerts</h3>
         <table>
-          <thead><tr><th>Rule</th><th>Name</th><th>Severity</th><th>Host</th><th>User</th><th>Events</th><th>Runbook</th></tr></thead>
-          <tbody>{"".join(alert_rows) or '<tr><td colspan="7">No alerts fired.</td></tr>'}</tbody>
+          <thead><tr><th>Rule</th><th>Name</th><th>Severity</th><th>Host</th><th>User</th><th>Events</th><th>Dwell</th><th>Runbook</th></tr></thead>
+          <tbody>{"".join(alert_rows) or '<tr><td colspan="8">No alerts fired.</td></tr>'}</tbody>
         </table>
       </div>
     """

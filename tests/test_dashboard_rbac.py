@@ -19,6 +19,7 @@ def test_route_policy_keeps_tooling_behind_engineer_role() -> None:
     # read-only roles see scenario status but not the detection tooling
     assert can(Role.viewer, ROUTE_PERMISSIONS["/"])
     assert can(Role.viewer, ROUTE_PERMISSIONS["/scenario"])
+    assert not can(Role.viewer, ROUTE_PERMISSIONS["/validate"])
     assert not can(Role.viewer, ROUTE_PERMISSIONS["/coverage"])
     assert not can(Role.analyst, ROUTE_PERMISSIONS["/ai-battle"])
     # engineers and admins reach every dashboard route
@@ -66,3 +67,35 @@ def test_viewer_is_forbidden_from_coverage(viewer_server: tuple[str, str]) -> No
     assert _status(f"{base}/", cookie) == 200
     assert _status(f"{base}/coverage", cookie) == 403
     assert _status(f"{base}/ai-battle", cookie) == 403
+
+
+@pytest.fixture()
+def open_server(tmp_path: Path) -> Iterator[str]:
+    for name in ("detections", "scenarios", "telemetry", "runbooks", "configs"):
+        shutil.copytree(ROOT / name, tmp_path / name)
+
+    DashboardHandler.root = tmp_path
+    DashboardHandler.auth_config = AuthConfig(
+        enabled=False, username="admin", password=None, role=Role.admin
+    )
+    DashboardHandler.sessions = SessionStore()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), DashboardHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+    try:
+        yield f"http://{host}:{port}"
+    finally:
+        server.shutdown()
+
+
+def test_dashboard_validate_action_writes_history_and_reports(open_server: str) -> None:
+    request = urllib.request.Request(f"{open_server}/validate", method="POST")
+
+    with urllib.request.urlopen(request) as response:
+        assert int(response.status) == 200
+
+    root = DashboardHandler.root
+    assert (root / ".dmz" / "scenario-history.ndjson").exists()
+    assert (root / "reports" / "auth-bruteforce-sim.md").exists()
