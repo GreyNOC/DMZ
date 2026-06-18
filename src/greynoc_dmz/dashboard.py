@@ -68,7 +68,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ]
             self._send_html(
                 render_dashboard(
-                    validate_all(self.root),
+                    validate_all(self.root, persist=False),
                     read_history(self.root / ".dmz"),
                     coverage_for_root(self.root),
                     integration_checks,
@@ -102,7 +102,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(_battle_from_params(params).to_dict())
             return
         if parsed.path == "/api/status":
-            results = validate_all(self.root)
+            results = validate_all(self.root, persist=False)
             integration_checks = [
                 check_integration_config(config) for config in load_integrations(self.root)
             ]

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import socket
+import webbrowser
 from pathlib import Path
 from typing import Annotated
 
@@ -30,6 +33,7 @@ from .integrations import (
 from .lint import has_errors, lint_repo
 from .reporting import write_report
 from .ruletest import has_failures, run_rule_tests
+from .runtime import resolve_lab_root
 from .security import scan_repo
 
 app = typer.Typer(help="GreyNOC DMZ detection validation CLI")
@@ -37,7 +41,29 @@ console = Console()
 
 
 def _root() -> Path:
-    return Path.cwd()
+    return resolve_lab_root(Path.cwd())
+
+
+def _available_port(host: str, start: int, attempts: int = 20) -> int:
+    for port in range(start, start + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            if sock.connect_ex((host, port)) != 0:
+                return port
+    raise RuntimeError(f"no available port found from {start} to {start + attempts - 1}")
+
+
+def launch_desktop(host: str = "127.0.0.1", port: int = 8787) -> None:
+    root = _root()
+    selected_port = _available_port(host, port)
+    url = f"http://{host}:{selected_port}"
+    console.print("GreyNOC DMZ desktop launcher")
+    console.print(f"Lab root: {root}")
+    console.print(f"Dashboard: {url}")
+    console.print("Close this window to stop the dashboard.")
+    if os.environ.get("GREYNOC_DMZ_NO_BROWSER") != "1":
+        webbrowser.open(url)
+    serve(root, host, selected_port)
 
 
 @app.command("run-scenario")

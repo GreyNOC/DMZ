@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to publish, for example v0.1.0
+        description: Release tag to publish, for example v0.4.2
         required: true
         type: string
 
@@ -70,7 +70,7 @@ jobs:
 
       - name: Build portable Windows executable
         run: |
-          python -m PyInstaller --clean --noconfirm --onefile --console --name greynoc-dmz --collect-submodules greynoc_dmz src\greynoc_dmz\__main__.py
+          python -m PyInstaller --clean --noconfirm --onefile --console --name greynoc-dmz --collect-submodules greynoc_dmz --add-data "configs;greynoc_dmz_lab/configs" --add-data "detections;greynoc_dmz_lab/detections" --add-data "scenarios;greynoc_dmz_lab/scenarios" --add-data "telemetry;greynoc_dmz_lab/telemetry" --add-data "runbooks;greynoc_dmz_lab/runbooks" src\greynoc_dmz\__main__.py
           .\dist\greynoc-dmz.exe --help
 
       - name: Package Windows bundle

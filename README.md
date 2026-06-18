@@ -81,6 +81,9 @@ Or run the portable executable directly:
 .\greynoc-dmz.exe validate-all
 ```
 
+Double-clicking `greynoc-dmz.exe` opens the local dashboard and keeps a console
+window open with the dashboard URL. Close that window to stop the dashboard.
+
 ## Local authentication
 
 Authentication is off by default for local development. It can be enabled with the documented GreyNOC DMZ environment variables before starting the dashboard.
