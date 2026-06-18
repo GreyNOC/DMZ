@@ -7,13 +7,23 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .ai_battle import simulate_battle
-from .config import load_lab_config
-from .coverage import coverage_for_root
+from .ai import (
+    AIProviderError,
+    AIReadinessStatus,
+    check_ai_readiness,
+    load_ai_config,
+    run_live_check,
+    run_scenario_review,
+)
 from .dashboard import serve
+from .dataset import DatasetFormat, build_dataset, run_lab, write_dataset
 from .engine import run_scenario, validate_all
-from .integrations import check_integration_config, default_integrations
-from .lint import has_errors, lint_repo
+from .integrations import (
+    PublishOutcome,
+    check_integration_config,
+    load_integrations,
+    publish_all,
+)
 from .reporting import write_report
 from .ruletest import has_failures, run_rule_tests
 from .security import scan_repo
@@ -172,12 +182,136 @@ def integration_check_cmd() -> None:
     table = Table(title="GreyNOC DMZ Integrations")
     table.add_column("Name")
     table.add_column("Kind")
+    table.add_column("Adapter")
     table.add_column("Status")
     table.add_column("Detail")
-    for config in default_integrations():
+    for config in load_integrations(_root()):
         check = check_integration_config(config)
-        table.add_row(check.name, check.kind.value, check.status.value, check.detail)
+        table.add_row(check.name, check.kind.value, check.adapter, check.status.value, check.detail)
     console.print(table)
+
+
+@app.command("integration-publish")
+def integration_publish_cmd(
+    send: Annotated[
+        bool,
+        typer.Option("--send/--dry-run", help="Transmit to integrations instead of a dry run"),
+    ] = False,
+) -> None:
+    root = _root()
+    results = validate_all(root)
+    outcomes = publish_all(results, load_integrations(root), dry_run=not send, root=root)
+    if not outcomes:
+        console.print(
+            "integration-publish: no ready integrations; run integration-check for details"
+        )
+        return
+
+    table = Table(title=f"GreyNOC DMZ Publish ({'send' if send else 'dry-run'})")
+    table.add_column("Integration")
+    table.add_column("Adapter")
+    table.add_column("Scenario")
+    table.add_column("Outcome")
+    table.add_column("Detail")
+    problems = 0
+    for outcome in outcomes:
+        if outcome.outcome in {PublishOutcome.error, PublishOutcome.blocked}:
+            problems += 1
+        table.add_row(
+            outcome.integration,
+            outcome.adapter,
+            outcome.scenario_id,
+            outcome.outcome.value,
+            outcome.detail,
+        )
+    console.print(table)
+    if problems:
+        raise typer.Exit(code=1)
+
+
+@app.command("ai-check")
+def ai_check_cmd(
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Make a live provider call to confirm connectivity"),
+    ] = False,
+) -> None:
+    config = load_ai_config()
+    readiness = check_ai_readiness(config)
+    table = Table(title="GreyNOC DMZ AI Provider")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Status", readiness.status.value)
+    table.add_row("Provider", readiness.provider)
+    table.add_row("Model", readiness.model or "not set")
+    table.add_row("External", "yes" if readiness.external else "no")
+    table.add_row("Detail", readiness.detail)
+    console.print(table)
+    if not live:
+        return
+    if readiness.status is not AIReadinessStatus.ready:
+        console.print("ai-check --live: provider is not ready")
+        raise typer.Exit(code=1)
+    try:
+        response = run_live_check(config)
+    except AIProviderError as error:
+        console.print(f"ai-check --live: failed: {error}")
+        raise typer.Exit(code=1) from error
+    console.print(f"ai-check --live: ok ({response.provider} / {response.model})")
+
+
+@app.command("ai-review")
+def ai_review_cmd() -> None:
+    config = load_ai_config()
+    readiness = check_ai_readiness(config)
+    if readiness.status is not AIReadinessStatus.ready:
+        console.print(f"ai-review: AI provider is not ready ({readiness.detail})")
+        raise typer.Exit(code=1)
+    results = validate_all(_root())
+    try:
+        review = run_scenario_review(config, results)
+    except AIProviderError as error:
+        console.print(f"ai-review: failed: {error}")
+        raise typer.Exit(code=1) from error
+    console.print("AI-assisted advisory review", style="bold")
+    console.print(review.text, markup=False)
+
+
+@app.command("export-dataset")
+def export_dataset_cmd(
+    output_format: Annotated[
+        DatasetFormat, typer.Option("--format", help="Dataset format: raw or chat")
+    ] = DatasetFormat.raw,
+    out: Annotated[Path, typer.Option("--out", help="Output JSONL path")] = Path(
+        "datasets/dmz-dataset.jsonl"
+    ),
+    with_ai: Annotated[
+        bool, typer.Option("--with-ai", help="Add a per-scenario AI analysis note")
+    ] = False,
+) -> None:
+    root = _root()
+    runs = run_lab(root)
+    ai_notes: dict[str, str] | None = None
+    if with_ai:
+        config = load_ai_config()
+        readiness = check_ai_readiness(config)
+        if readiness.status is not AIReadinessStatus.ready:
+            console.print(
+                f"export-dataset: --with-ai needs a ready AI provider ({readiness.detail})"
+            )
+            raise typer.Exit(code=1)
+        ai_notes = {}
+        for run in runs:
+            try:
+                ai_notes[run.scenario.id] = run_scenario_review(config, [run.result]).text
+            except AIProviderError as error:
+                console.print(f"export-dataset: AI note skipped for {run.scenario.id}: {error}")
+    records = build_dataset(runs, output_format, ai_notes=ai_notes)
+    out_path = out if out.is_absolute() else root / out
+    write_dataset(records, out_path)
+    console.print(
+        f"export-dataset: wrote {len(records)} {output_format.value} record(s) to {out_path}"
+    )
 
 
 @app.command("security-check")

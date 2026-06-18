@@ -32,6 +32,11 @@ Do not expose the built-in Python dashboard directly to the public internet. It 
 - MITRE ATT&CK coverage analysis
 - CI validation
 - Scheduled DMZ bot workflow
+- Vendor-neutral outbound integration adapters
+- Integration endpoint safety gate (local and private allowed, external opt-in)
+- Dry-run-by-default integration publishing
+- Vendor-neutral AI provider layer, disabled by default
+- AI endpoint safety gate and advisory-only AI output
 
 ## Known gaps
 
@@ -41,6 +46,7 @@ Do not expose the built-in Python dashboard directly to the public internet. It 
 - No reverse proxy config yet
 - No signed release artifacts yet
 - No formal threat model document yet
+- No inbound telemetry adapters yet; results are published outbound only
 
 ## Release gate
 
@@ -51,7 +57,7 @@ ruff check .
 mypy src
 pytest
 greynoc-dmz security-check
-greynoc-dmz lint
 greynoc-dmz integration-check
+greynoc-dmz ai-check
 greynoc-dmz validate-all
 ```

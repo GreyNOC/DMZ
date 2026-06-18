@@ -6,8 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .access import Role, can
-from .ai_battle import BattleResult, simulate_battle
+from .ai import AIReadiness, check_ai_readiness, load_ai_config
 from .auth import (
     AuthConfig,
     SessionStore,
@@ -20,6 +19,7 @@ from .auth import (
 from .correlation import correlate
 from .coverage import CoverageReport, coverage_for_root
 from .engine import validate_all
+from .integrations import IntegrationCheck, check_integration_config, load_integrations
 from .models import ScenarioResult
 from .store import read_history
 
@@ -61,20 +61,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_error(403, "insufficient role")
             return
         if parsed.path in {"/", "/index.html"}:
+            integration_checks = [
+                check_integration_config(config) for config in load_integrations(self.root)
+            ]
             self._send_html(
                 render_dashboard(
-                    validate_all(self.root, persist=False),
+                    validate_all(self.root),
                     read_history(self.root / ".dmz"),
-                    coverage_for_root(self.root),
+                    integration_checks,
+                    check_ai_readiness(load_ai_config()),
                     self.auth_config.enabled,
                 )
             )
-            return
-        if parsed.path == "/coverage":
-            self._send_html(render_coverage(coverage_for_root(self.root)))
-            return
-        if parsed.path == "/api/coverage":
-            self._send_json(coverage_for_root(self.root).to_dict())
             return
         if parsed.path == "/scenario":
             scenario_id = parse_qs(parsed.query).get("id", [""])[0]
@@ -95,10 +93,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(_battle_from_params(params).to_dict())
             return
         if parsed.path == "/api/status":
-            results = validate_all(self.root, persist=False)
-            coverage = coverage_for_root(self.root)
-            covered, total = coverage.tactic_coverage_ratio
-            role = self._effective_role()
+            results = validate_all(self.root)
+            integration_checks = [
+                check_integration_config(config) for config in load_integrations(self.root)
+            ]
+            ai_readiness = check_ai_readiness(load_ai_config())
             payload = {
                 "app": "GreyNOC DMZ",
                 "auth_enabled": self.auth_config.enabled,
@@ -108,8 +107,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "failing": sum(1 for item in results if not item.passed),
                 "tactic_coverage": f"{covered}/{total}",
                 "results": [item.model_dump(mode="json") for item in results],
-                "ai_battle_api": "/api/ai-battle",
-                "coverage_api": "/api/coverage",
+                "integrations": [
+                    {
+                        "name": check.name,
+                        "kind": check.kind.value,
+                        "adapter": check.adapter,
+                        "status": check.status.value,
+                    }
+                    for check in integration_checks
+                ],
+                "ai": {
+                    "status": ai_readiness.status.value,
+                    "provider": ai_readiness.provider,
+                    "model": ai_readiness.model,
+                    "external": ai_readiness.external,
+                },
             }
             self._send_json(payload)
             return
@@ -126,7 +138,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         username = params.get("username", [""])[0]
         password = params.get("password", [""])[0]
         if verify_login(self.auth_config, username, password):
-            session = self.sessions.create(username or self.auth_config.username, self.auth_config.role)
+            session = self.sessions.create(
+                username or self.auth_config.username, self.auth_config.role
+            )
             secure = self.headers.get("X-Forwarded-Proto") == "https"
             self._redirect("/", cookie=build_session_cookie(session, secure=secure))
             return
@@ -138,18 +152,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         token = parse_cookie(self.headers.get("Cookie"))
         return self.sessions.get(token) is not None
 
-    def _effective_role(self) -> Role | None:
-        if not self.auth_config.enabled:
-            return Role.admin
-        token = parse_cookie(self.headers.get("Cookie"))
-        session = self.sessions.get(token)
-        return session.role if session else None
-
-    def _has_permission(self, permission: str) -> bool:
-        role = self._effective_role()
-        return role is not None and can(role, permission)
-
-    def _redirect(self, location: str, cookie: str | None = None, clear_cookie: bool = False) -> None:
+    def _redirect(
+        self, location: str, cookie: str | None = None, clear_cookie: bool = False
+    ) -> None:
         self.send_response(302)
         self.send_header("Location", location)
         if cookie:
@@ -162,7 +167,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         payload = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+        )
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cache-Control", "no-store")
@@ -280,7 +288,8 @@ def render_login(error: str | None) -> str:
 def render_dashboard(
     results: list[ScenarioResult],
     history: list[dict[str, object]],
-    coverage: CoverageReport,
+    integration_checks: list[IntegrationCheck],
+    ai_readiness: AIReadiness,
     auth_enabled: bool,
 ) -> str:
     rows = []
@@ -317,6 +326,25 @@ def render_dashboard(
             "</tr>"
         )
 
+    integration_rows = []
+    for check in integration_checks:
+        integration_rows.append(
+            "<tr>"
+            f"<td>{html.escape(check.name)}</td>"
+            f"<td>{html.escape(check.kind.value)}</td>"
+            f"<td>{html.escape(check.adapter)}</td>"
+            f"<td><span class='status {'pass' if check.status.value == 'ready' else 'fail'}'>"
+            f"{html.escape(check.status.value)}</span></td>"
+            f"<td>{html.escape(check.detail)}</td>"
+            "</tr>"
+        )
+
+    ai_status = ai_readiness.status.value
+    ai_status_class = "pass" if ai_status == "ready" else "fail"
+    ai_provider = html.escape(ai_readiness.provider)
+    ai_model = html.escape(ai_readiness.model or "not set")
+    ai_detail = html.escape(ai_readiness.detail)
+
     auth_label = "enabled" if auth_enabled else "disabled"
     covered, total_tactics = coverage.tactic_coverage_ratio
     body = f"""
@@ -341,14 +369,30 @@ def render_dashboard(
           <h3>Scenario status</h3>
           <table>
             <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Fired</th><th>Missing</th><th>Unexpected</th></tr></thead>
-            <tbody>{''.join(rows)}</tbody>
+            <tbody>{"".join(rows)}</tbody>
           </table>
         </div>
         <div class="panel">
           <h3>Recent validation history</h3>
           <table>
             <thead><tr><th>Recorded</th><th>Scenario</th><th>Status</th><th>Alerts</th></tr></thead>
-            <tbody>{''.join(history_rows) or '<tr><td colspan="4">No history yet.</td></tr>'}</tbody>
+            <tbody>{"".join(history_rows) or '<tr><td colspan="4">No history yet.</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Integrations</h3>
+          <table>
+            <thead><tr><th>Name</th><th>Kind</th><th>Adapter</th><th>Status</th><th>Detail</th></tr></thead>
+            <tbody>{"".join(integration_rows) or '<tr><td colspan="5">No integrations configured.</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>AI provider</h3>
+          <table>
+            <tr><th>Status</th><td><span class="status {ai_status_class}">{ai_status}</span></td></tr>
+            <tr><th>Provider</th><td>{ai_provider}</td></tr>
+            <tr><th>Model</th><td>{ai_model}</td></tr>
+            <tr><th>Detail</th><td>{ai_detail}</td></tr>
           </table>
         </div>
         <div class="panel">Authentication: <code>{auth_label}</code>. Status API: <code>/api/status</code></div>
@@ -485,11 +529,11 @@ def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
         <table>
           <tr><th>Scenario ID</th><td>{html.escape(result.scenario_id)}</td></tr>
           <tr><th>Status</th><td><span class='status {status.lower()}'>{status}</span></td></tr>
-          <tr><th>Expected</th><td>{html.escape(', '.join(result.expected_rules) or 'none')}</td></tr>
-          <tr><th>Fired</th><td>{html.escape(', '.join(result.fired_rules) or 'none')}</td></tr>
-          <tr><th>Missing</th><td>{html.escape(', '.join(result.missing_rules) or 'none')}</td></tr>
-          <tr><th>Unexpected</th><td>{html.escape(', '.join(result.unexpected_rules) or 'none')}</td></tr>
-          <tr><th>Authentication</th><td>{'enabled' if auth_enabled else 'disabled'}</td></tr>
+          <tr><th>Expected</th><td>{html.escape(", ".join(result.expected_rules) or "none")}</td></tr>
+          <tr><th>Fired</th><td>{html.escape(", ".join(result.fired_rules) or "none")}</td></tr>
+          <tr><th>Missing</th><td>{html.escape(", ".join(result.missing_rules) or "none")}</td></tr>
+          <tr><th>Unexpected</th><td>{html.escape(", ".join(result.unexpected_rules) or "none")}</td></tr>
+          <tr><th>Authentication</th><td>{"enabled" if auth_enabled else "disabled"}</td></tr>
         </table>
       </div>
       <div class="panel">
@@ -502,8 +546,8 @@ def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
       <div class="panel">
         <h3>Alerts</h3>
         <table>
-          <thead><tr><th>Rule</th><th>Name</th><th>Severity</th><th>Host</th><th>User</th><th>Events</th><th>Dwell</th><th>Runbook</th></tr></thead>
-          <tbody>{''.join(alert_rows) or '<tr><td colspan="8">No alerts fired.</td></tr>'}</tbody>
+          <thead><tr><th>Rule</th><th>Name</th><th>Severity</th><th>Host</th><th>User</th><th>Events</th><th>Runbook</th></tr></thead>
+          <tbody>{"".join(alert_rows) or '<tr><td colspan="7">No alerts fired.</td></tr>'}</tbody>
         </table>
       </div>
     """

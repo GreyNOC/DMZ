@@ -12,5 +12,6 @@ reports/*.md
 reports/*.json
 evidence/*.json
 evidence/*.ndjson
+datasets/
 .env
 .DS_Store

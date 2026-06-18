@@ -81,7 +81,9 @@ def load_auth_config() -> AuthConfig:
 def verify_login(config: AuthConfig, username: str, password: str) -> bool:
     if not config.enabled or config.password is None:
         return True
-    return hmac.compare_digest(username, config.username) and hmac.compare_digest(password, config.password)
+    return hmac.compare_digest(username, config.username) and hmac.compare_digest(
+        password, config.password
+    )
 
 
 def parse_cookie(header: str | None) -> str | None:

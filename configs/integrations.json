@@ -1,0 +1,52 @@
+{
+  "integrations": [
+    {
+      "name": "local-evidence-file",
+      "kind": "file",
+      "adapter": "file",
+      "enabled": false,
+      "options": {
+        "path": "evidence/integration-outbox.ndjson"
+      }
+    },
+    {
+      "name": "soc-webhook",
+      "kind": "edr",
+      "adapter": "webhook",
+      "enabled": false,
+      "base_url": "https://events.example.invalid/greynoc-dmz",
+      "token_env": "DMZ_WEBHOOK_TOKEN",
+      "timeout_seconds": 10,
+      "verify_tls": true
+    },
+    {
+      "name": "splunk-hec",
+      "kind": "siem",
+      "adapter": "splunk_hec",
+      "enabled": false,
+      "base_url": "https://splunk.example.invalid:8088",
+      "token_env": "DMZ_SPLUNK_HEC_TOKEN",
+      "timeout_seconds": 10,
+      "verify_tls": true,
+      "options": {
+        "index": "greynoc_dmz",
+        "sourcetype": "greynoc:dmz:validation"
+      }
+    },
+    {
+      "name": "jira-detection-gaps",
+      "kind": "ticketing",
+      "adapter": "jira",
+      "enabled": false,
+      "base_url": "https://your-org.atlassian.net",
+      "token_env": "DMZ_JIRA_API_TOKEN",
+      "timeout_seconds": 15,
+      "verify_tls": true,
+      "options": {
+        "email": "dmz-bot@example.invalid",
+        "project": "SOC",
+        "issue_type": "Task"
+      }
+    }
+  ]
+}

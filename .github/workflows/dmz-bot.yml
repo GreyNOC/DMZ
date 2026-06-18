@@ -31,5 +31,7 @@ jobs:
         run: greynoc-dmz test-rules
       - name: Integration readiness
         run: greynoc-dmz integration-check
+      - name: AI readiness
+        run: greynoc-dmz ai-check
       - name: Scenario validation
         run: greynoc-dmz validate-all

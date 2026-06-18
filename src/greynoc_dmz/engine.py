@@ -24,7 +24,9 @@ def event_matches_rule(event: TelemetryEvent, rule: DetectionRule) -> bool:
     return True
 
 
-def _threshold_window(events: list[TelemetryEvent], threshold: int, window_minutes: int) -> list[TelemetryEvent] | None:
+def _threshold_window(
+    events: list[TelemetryEvent], threshold: int, window_minutes: int
+) -> list[TelemetryEvent] | None:
     ordered = sorted(events, key=lambda item: item.timestamp)
     if len(ordered) < threshold:
         return None
