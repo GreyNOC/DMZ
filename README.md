@@ -64,6 +64,23 @@ Run with Docker:
 docker compose up --build
 ```
 
+## Windows release install
+
+GitHub Releases include a portable Windows executable and installer launchers.
+
+Download and run the installer from the latest release:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-greynoc-dmz.ps1 -AddToPath
+```
+
+Or run the portable executable directly:
+
+```powershell
+.\greynoc-dmz.exe --help
+.\greynoc-dmz.exe validate-all
+```
+
 ## Local authentication
 
 Authentication is off by default for local development. It can be enabled with the documented GreyNOC DMZ environment variables before starting the dashboard.

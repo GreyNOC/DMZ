@@ -1,0 +1,116 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      - name: Resolve release tag
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "RELEASE_TAG=${{ inputs.tag }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } else {
+            "RELEASE_TAG=${{ github.ref_name }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install build and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,release]'
+
+      - name: Run Ruff lint
+        run: ruff check .
+
+      - name: Run mypy
+        run: mypy src
+
+      - name: Run tests
+        run: pytest
+
+      - name: Run GreyNOC checks
+        run: |
+          greynoc-dmz security-check
+          greynoc-dmz lint
+          greynoc-dmz test-rules
+          greynoc-dmz integration-check
+          greynoc-dmz validate-all
+
+      - name: Build Python distributions
+        run: python -m build
+
+      - name: Build portable Windows executable
+        run: |
+          python -m PyInstaller --clean --noconfirm --onefile --console --name greynoc-dmz --collect-submodules greynoc_dmz src\greynoc_dmz\__main__.py
+          .\dist\greynoc-dmz.exe --help
+
+      - name: Package Windows bundle
+        shell: pwsh
+        run: |
+          $bundle = Join-Path $env:RUNNER_TEMP "greynoc-dmz-windows-x64"
+          New-Item -ItemType Directory -Path $bundle -Force | Out-Null
+          Copy-Item -LiteralPath "dist\greynoc-dmz.exe" -Destination $bundle
+          Copy-Item -LiteralPath "scripts\install-greynoc-dmz.ps1" -Destination $bundle
+          Copy-Item -LiteralPath "scripts\install-greynoc-dmz.cmd" -Destination $bundle
+          Copy-Item -LiteralPath "README.md" -Destination $bundle
+          Copy-Item -LiteralPath "SECURITY.md" -Destination $bundle
+          Compress-Archive -Path (Join-Path $bundle "*") -DestinationPath "dist\greynoc-dmz-windows-x64.zip" -Force
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $notes = @"
+          GreyNOC DMZ $env:RELEASE_TAG
+
+          Assets:
+          - greynoc-dmz.exe: portable Windows x64 CLI
+          - greynoc-dmz-windows-x64.zip: portable bundle with installer scripts
+          - install-greynoc-dmz.ps1 / install-greynoc-dmz.cmd: installer launchers
+          - Python wheel and source distribution
+          "@
+
+          $assets = @(
+            "dist\greynoc-dmz.exe",
+            "dist\greynoc-dmz-windows-x64.zip",
+            "scripts\install-greynoc-dmz.ps1",
+            "scripts\install-greynoc-dmz.cmd"
+          )
+          $assets += (Get-ChildItem -Path "dist\*.whl", "dist\*.tar.gz" -File).FullName
+
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG @assets --clobber
+          } else {
+            gh release create $env:RELEASE_TAG @assets --title "GreyNOC DMZ $env:RELEASE_TAG" --notes $notes --verify-tag
+          }
