@@ -15,6 +15,9 @@ from .ai import (
     run_live_check,
     run_scenario_review,
 )
+from .ai_battle import simulate_battle
+from .config import load_lab_config
+from .coverage import coverage_for_root
 from .dashboard import serve
 from .dataset import DatasetFormat, build_dataset, run_lab, write_dataset
 from .engine import run_scenario, validate_all
@@ -24,6 +27,7 @@ from .integrations import (
     load_integrations,
     publish_all,
 )
+from .lint import has_errors, lint_repo
 from .reporting import write_report
 from .ruletest import has_failures, run_rule_tests
 from .security import scan_repo

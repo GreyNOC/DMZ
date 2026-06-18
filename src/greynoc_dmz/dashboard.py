@@ -6,7 +6,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .access import Role, can
 from .ai import AIReadiness, check_ai_readiness, load_ai_config
+from .ai_battle import BattleResult, simulate_battle
 from .auth import (
     AuthConfig,
     SessionStore,
@@ -68,11 +70,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 render_dashboard(
                     validate_all(self.root),
                     read_history(self.root / ".dmz"),
+                    coverage_for_root(self.root),
                     integration_checks,
                     check_ai_readiness(load_ai_config()),
                     self.auth_config.enabled,
                 )
             )
+            return
+        if parsed.path == "/coverage":
+            self._send_html(render_coverage(coverage_for_root(self.root)))
+            return
+        if parsed.path == "/api/coverage":
+            self._send_json(coverage_for_root(self.root).to_dict())
             return
         if parsed.path == "/scenario":
             scenario_id = parse_qs(parsed.query).get("id", [""])[0]
@@ -98,6 +107,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 check_integration_config(config) for config in load_integrations(self.root)
             ]
             ai_readiness = check_ai_readiness(load_ai_config())
+            coverage = coverage_for_root(self.root)
+            covered, total = coverage.tactic_coverage_ratio
+            role = self._effective_role()
             payload = {
                 "app": "GreyNOC DMZ",
                 "auth_enabled": self.auth_config.enabled,
@@ -151,6 +163,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return True
         token = parse_cookie(self.headers.get("Cookie"))
         return self.sessions.get(token) is not None
+
+    def _effective_role(self) -> Role | None:
+        if not self.auth_config.enabled:
+            return Role.admin
+        token = parse_cookie(self.headers.get("Cookie"))
+        session = self.sessions.get(token)
+        return session.role if session else None
+
+    def _has_permission(self, permission: str) -> bool:
+        role = self._effective_role()
+        return role is not None and can(role, permission)
 
     def _redirect(
         self, location: str, cookie: str | None = None, clear_cookie: bool = False
@@ -288,6 +311,7 @@ def render_login(error: str | None) -> str:
 def render_dashboard(
     results: list[ScenarioResult],
     history: list[dict[str, object]],
+    coverage: CoverageReport,
     integration_checks: list[IntegrationCheck],
     ai_readiness: AIReadiness,
     auth_enabled: bool,
