@@ -61,12 +61,29 @@ def _status(url: str, cookie: str) -> int:
         return int(exc.code)
 
 
+def _body(url: str, cookie: str) -> str:
+    request = urllib.request.Request(url, headers={"Cookie": cookie})
+    with urllib.request.urlopen(request) as response:
+        return response.read().decode("utf-8")
+
+
 def test_viewer_is_forbidden_from_coverage(viewer_server: tuple[str, str]) -> None:
     base, cookie = viewer_server
 
     assert _status(f"{base}/", cookie) == 200
     assert _status(f"{base}/coverage", cookie) == 403
     assert _status(f"{base}/ai-battle", cookie) == 403
+
+
+def test_viewer_dashboard_hides_engineer_only_controls(viewer_server: tuple[str, str]) -> None:
+    base, cookie = viewer_server
+
+    body = _body(f"{base}/", cookie)
+
+    assert 'href="/coverage"' not in body
+    assert 'href="/ai-battle"' not in body
+    assert 'action="/validate"' not in body
+    assert "Scenario status" in body
 
 
 @pytest.fixture()

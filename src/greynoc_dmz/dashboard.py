@@ -69,6 +69,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             integration_checks = [
                 check_integration_config(config) for config in load_integrations(self.root)
             ]
+            role = self._effective_role()
+            if role is None:
+                self.send_error(403, "insufficient role")
+                return
             self._send_html(
                 render_dashboard(
                     validate_all(self.root, persist=False),
@@ -77,11 +81,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     integration_checks,
                     check_ai_readiness(load_ai_config()),
                     self.auth_config.enabled,
+                    role,
                 )
             )
             return
         if parsed.path == "/coverage":
-            self._send_html(render_coverage(coverage_for_root(self.root)))
+            role = self._effective_role()
+            if role is None:
+                self.send_error(403, "insufficient role")
+                return
+            self._send_html(render_coverage(coverage_for_root(self.root), role))
             return
         if parsed.path == "/api/coverage":
             self._send_json(coverage_for_root(self.root).to_dict())
@@ -93,12 +102,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if result is None:
                 self.send_error(404)
                 return
-            self._send_html(render_scenario_detail(result, self.auth_config.enabled))
+            role = self._effective_role()
+            if role is None:
+                self.send_error(403, "insufficient role")
+                return
+            self._send_html(render_scenario_detail(result, self.auth_config.enabled, role))
             return
         if parsed.path == "/ai-battle":
             params = parse_qs(parsed.query)
             battle = _battle_from_params(params)
-            self._send_html(render_ai_battle(battle))
+            role = self._effective_role()
+            if role is None:
+                self.send_error(403, "insufficient role")
+                return
+            self._send_html(render_ai_battle(battle, role))
             return
         if parsed.path == "/api/ai-battle":
             params = parse_qs(parsed.query)
@@ -248,10 +265,26 @@ def _battle_from_params(params: dict[str, list[str]]) -> BattleResult:
         _first(params, "objective", "Establish operational dominance in a synthetic SOC exercise."),
         _first(params, "one_strategy", "balanced"),
         _first(params, "two_strategy", "adaptive"),
+        _first(params, "seed", ""),
     )
 
 
-def _page(title: str, body: str) -> str:
+def _menu(role: Role | None) -> str:
+    if role is None:
+        return '<span>Login</span>'
+
+    items = ['<a href="/">Scenarios</a>']
+    if can(role, "rule:read"):
+        items.append('<a href="/coverage">Coverage</a>')
+    if can(role, "rule:test"):
+        items.append('<a href="/ai-battle">AI Battle</a>')
+    if can(role, "dashboard:read"):
+        items.append('<a href="/api/status">API</a>')
+    items.append('<a href="/logout">Logout</a>')
+    return "".join(items)
+
+
+def _page(title: str, body: str, role: Role | None = Role.admin) -> str:
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -294,7 +327,7 @@ def _page(title: str, body: str) -> str:
   <div class="desktop">
     <div class="window">
       <div class="titlebar"><span>{html.escape(title)}</span><span class="controls"><span>_</span><span>[]</span><span>X</span></span></div>
-      <div class="menu"><a href="/">Scenarios</a><a href="/coverage">Coverage</a><a href="/ai-battle">AI Battle</a><a href="/api/status">API</a><a href="/logout">Logout</a></div>
+      <div class="menu">{_menu(role)}</div>
       <div class="content">{body}</div>
       <div class="footer">GreyNOC DMZ local detection manager</div>
     </div>
@@ -320,6 +353,7 @@ def render_login(error: str | None) -> str:
           <p>Authentication is enabled when <code>GREYNOC_DMZ_PASSWORD</code> is set.</p>
         </div>
         """,
+        role=None,
     )
 
 
@@ -330,6 +364,7 @@ def render_dashboard(
     integration_checks: list[IntegrationCheck],
     ai_readiness: AIReadiness,
     auth_enabled: bool,
+    role: Role,
 ) -> str:
     rows = []
     passed = 0
@@ -386,12 +421,40 @@ def render_dashboard(
 
     auth_label = "enabled" if auth_enabled else "disabled"
     covered, total_tactics = coverage.tactic_coverage_ratio
-    body = f"""
+    validation_panel = (
+        """
         <div class="panel">
           <form method="post" action="/validate">
             <button type="submit">Run Validation</button>
           </form>
         </div>
+        """
+        if can(role, "scenario:run")
+        else ""
+    )
+    coverage_panel = (
+        f"""
+        <div class="panel">
+          <h3>MITRE ATT&amp;CK coverage</h3>
+          <p>Tactics covered: <b>{covered}/{total_tactics}</b>. <a href="/coverage">View coverage map</a> or call <code>/api/coverage</code>.</p>
+        </div>
+        """
+        if can(role, "rule:read")
+        else ""
+    )
+    battle_panel = (
+        """
+        <div class="panel">
+          <h3>AI Battle Arena</h3>
+          <p>Run two local AI profiles against each other in a synthetic SOC dominance exercise.</p>
+          <p><a href="/ai-battle">Open AI Battle</a> or call <code>/api/ai-battle</code>.</p>
+        </div>
+        """
+        if can(role, "rule:test")
+        else ""
+    )
+    body = f"""
+        {validation_panel}
         <div class="panel">
           <div class="grid">
             <div class="metric">Scenarios<b>{total}</b></div>
@@ -400,15 +463,8 @@ def render_dashboard(
             <div class="metric">Alerts<b>{alert_count}</b></div>
           </div>
         </div>
-        <div class="panel">
-          <h3>MITRE ATT&amp;CK coverage</h3>
-          <p>Tactics covered: <b>{covered}/{total_tactics}</b>. <a href="/coverage">View coverage map</a> or call <code>/api/coverage</code>.</p>
-        </div>
-        <div class="panel">
-          <h3>AI Battle Arena</h3>
-          <p>Run two local AI profiles against each other in a synthetic SOC dominance exercise.</p>
-          <p><a href="/ai-battle">Open AI Battle</a> or call <code>/api/ai-battle</code>.</p>
-        </div>
+        {coverage_panel}
+        {battle_panel}
         <div class="panel">
           <h3>Scenario status</h3>
           <table>
@@ -441,59 +497,165 @@ def render_dashboard(
         </div>
         <div class="panel">Authentication: <code>{auth_label}</code>. Status API: <code>/api/status</code></div>
     """
-    return _page("GreyNOC DMZ - Detection Manager", body)
+    return _page("GreyNOC DMZ - Detection Manager", body, role=role)
 
 
-def render_ai_battle(result: BattleResult) -> str:
+def _lead_timeline(result: BattleResult) -> str:
+    timeline = result.stats.lead_timeline
+    if not timeline:
+        return ""
+    peak = max((abs(value) for value in timeline), default=1) or 1
+    one_name = html.escape(result.ai_one.name)
+    two_name = html.escape(result.ai_two.name)
+    columns = []
+    for index, value in enumerate(timeline, start=1):
+        height = round(38 * abs(value) / peak)
+        leader = result.ai_one.name if value > 0 else result.ai_two.name if value < 0 else "tied"
+        up = (
+            f"<div style='width:100%;height:{height}px;background:#0a246a'></div>"
+            if value > 0
+            else ""
+        )
+        down = (
+            f"<div style='width:100%;height:{height}px;background:#8a0000'></div>"
+            if value < 0
+            else ""
+        )
+        columns.append(
+            f"<div title='Round {index}: {html.escape(leader)} {value:+d}' "
+            "style='flex:1;display:flex;flex-direction:column;height:80px;min-width:8px'>"
+            f"<div style='flex:1;display:flex;align-items:flex-end'>{up}</div>"
+            "<div style='height:1px;background:#808080'></div>"
+            f"<div style='flex:1;display:flex;align-items:flex-start'>{down}</div>"
+            "</div>"
+        )
+    return (
+        "<div class='panel'>"
+        "<h3>Lead timeline</h3>"
+        f"<p>Cumulative score margin per round. Above the line <b style='color:#0a246a'>{one_name}</b> "
+        f"leads; below, <b style='color:#8a0000'>{two_name}</b> leads.</p>"
+        f"<div style='display:flex;gap:3px;align-items:stretch'>{''.join(columns)}</div>"
+        "</div>"
+    )
+
+
+def render_ai_battle(result: BattleResult, role: Role = Role.admin) -> str:
+    stats = result.stats
+    one = result.ai_one
+    two = result.ai_two
+    one_name = html.escape(one.name)
+    two_name = html.escape(two.name)
+
     round_rows = []
     for battle_round in result.rounds:
+        margin_color = "#0b5f17" if battle_round.margin >= 0 else "#8a0000"
         round_rows.append(
             "<tr>"
             f"<td>{battle_round.round_number}</td>"
-            f"<td>{html.escape(battle_round.challenge)}</td>"
-            f"<td>{html.escape(battle_round.ai_one_move)}<br><b>{battle_round.ai_one_score}</b></td>"
-            f"<td>{html.escape(battle_round.ai_two_move)}<br><b>{battle_round.ai_two_score}</b></td>"
-            f"<td><span class='status win'>{html.escape(battle_round.winner)}</span><br>{html.escape(battle_round.reason)}</td>"
+            f"<td>{html.escape(battle_round.focus)}</td>"
+            f"<td align='right'><b>{battle_round.ai_one_score}</b></td>"
+            f"<td align='right'><b>{battle_round.ai_two_score}</b></td>"
+            f"<td align='right' style='color:{margin_color}'>{battle_round.margin:+d}</td>"
+            f"<td><span class='status win'>{html.escape(battle_round.winner)}</span><br>"
+            f"{html.escape(battle_round.reason)}</td>"
             "</tr>"
         )
+
+    challenge_rows = []
+    for item in stats.per_challenge:
+        challenge_rows.append(
+            "<tr>"
+            f"<td>{html.escape(item.focus)}</td>"
+            f"<td align='right'>{item.ai_one_score}</td>"
+            f"<td align='right'>{item.ai_two_score}</td>"
+            f"<td><span class='status win'>{html.escape(item.winner)}</span></td>"
+            "</tr>"
+        )
+
+    upset_note = " <b>(upset)</b>" if stats.upset else ""
+    comeback_note = (
+        f"<tr><th>Comeback</th><td>{html.escape(stats.comeback_winner)} won after trailing</td></tr>"
+        if stats.comeback_winner
+        else ""
+    )
 
     body = f"""
       <div class="panel">
         <form method="get" action="/ai-battle">
           <div class="battle-form">
-            <label>AI One<br><input name="one" value="{html.escape(result.ai_one.name)}"></label>
-            <label>AI Two<br><input name="two" value="{html.escape(result.ai_two.name)}"></label>
+            <label>AI One<br><input name="one" value="{one_name}"></label>
+            <label>AI Two<br><input name="two" value="{two_name}"></label>
             <label>Rounds<br><input name="rounds" value="{len(result.rounds)}"></label>
-            <label>AI One Strategy<br><input name="one_strategy" value="{html.escape(result.ai_one.strategy)}"></label>
-            <label>AI Two Strategy<br><input name="two_strategy" value="{html.escape(result.ai_two.strategy)}"></label>
-            <label>Objective<br><input name="objective" value="{html.escape(result.objective)}"></label>
+            <label>AI One Strategy<br><input name="one_strategy" value="{html.escape(one.strategy)}"></label>
+            <label>AI Two Strategy<br><input name="two_strategy" value="{html.escape(two.strategy)}"></label>
+            <label>Seed<br><input name="seed" value="{html.escape(result.seed)}" placeholder="optional rematch seed"></label>
           </div>
+          <label>Objective<br><input name="objective" value="{html.escape(result.objective)}"></label>
           <p><button type="submit">Start Battle</button></p>
         </form>
       </div>
       <div class="panel">
-        <h3>Dominance Result</h3>
+        <h3>Fighters</h3>
         <table>
-          <tr><th>Objective</th><td>{html.escape(result.objective)}</td></tr>
-          <tr><th>{html.escape(result.ai_one.name)}</th><td>{result.ai_one_total}</td></tr>
-          <tr><th>{html.escape(result.ai_two.name)}</th><td>{result.ai_two_total}</td></tr>
-          <tr><th>Winner</th><td><span class='status win'>{html.escape(result.winner)}</span></td></tr>
+          <thead><tr><th>AI</th><th>Strategy</th><th>Aggression</th><th>Defense</th><th>Adaptability</th><th>Power</th></tr></thead>
+          <tbody>
+            <tr><td>{one_name}</td><td>{html.escape(one.strategy)}</td><td align="right">{one.aggression}</td><td align="right">{one.defense}</td><td align="right">{one.adaptability}</td><td align="right"><b>{one.power}</b></td></tr>
+            <tr><td>{two_name}</td><td>{html.escape(two.strategy)}</td><td align="right">{two.aggression}</td><td align="right">{two.defense}</td><td align="right">{two.adaptability}</td><td align="right"><b>{two.power}</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Dominance result</h3>
+        <div class="grid">
+          <div class="metric">Winner<b>{html.escape(result.winner)}</b></div>
+          <div class="metric">Round record<b>{stats.ai_one_round_wins}&ndash;{stats.ai_two_round_wins}</b></div>
+          <div class="metric">Decisiveness<b>{html.escape(stats.decisiveness)}</b></div>
+          <div class="metric">Lead changes<b>{stats.lead_changes}</b></div>
+        </div>
+        <table>
+          <tr><th>Objective</th><td>{html.escape(result.objective)} <span style="color:#555">(rewards {html.escape(result.emphasis)})</span></td></tr>
+          <tr><th>{one_name} total</th><td>{result.ai_one_total} <span style="color:#555">({stats.dominance_share_one}% share)</span></td></tr>
+          <tr><th>{two_name} total</th><td>{result.ai_two_total} <span style="color:#555">({stats.dominance_share_two}% share)</span></td></tr>
+          <tr><th>Predicted by power</th><td>{html.escape(stats.predicted_winner)}{upset_note}</td></tr>
+          {comeback_note}
           <tr><th>Summary</th><td>{html.escape(result.summary)}</td></tr>
         </table>
       </div>
       <div class="panel">
-        <h3>Round Log</h3>
+        <h3>Match stats</h3>
         <table>
-          <thead><tr><th>Round</th><th>Challenge</th><th>{html.escape(result.ai_one.name)}</th><th>{html.escape(result.ai_two.name)}</th><th>Winner</th></tr></thead>
+          <thead><tr><th>Metric</th><th>{one_name}</th><th>{two_name}</th></tr></thead>
+          <tbody>
+            <tr><td>Round wins</td><td align="right">{stats.ai_one_round_wins}</td><td align="right">{stats.ai_two_round_wins}</td></tr>
+            <tr><td>Average per round</td><td align="right">{stats.ai_one_avg}</td><td align="right">{stats.ai_two_avg}</td></tr>
+            <tr><td>Consistency (lower is steadier)</td><td align="right">{stats.ai_one_consistency}</td><td align="right">{stats.ai_two_consistency}</td></tr>
+            <tr><td>Best round</td><td align="right">{stats.ai_one_best_round}</td><td align="right">{stats.ai_two_best_round}</td></tr>
+            <tr><td>Longest streak</td><td align="right">{stats.ai_one_longest_streak}</td><td align="right">{stats.ai_two_longest_streak}</td></tr>
+          </tbody>
+        </table>
+        <p>Draws: {stats.draws} &nbsp;|&nbsp; largest margin: {stats.largest_margin} &nbsp;|&nbsp; closest margin: {stats.closest_margin}</p>
+      </div>
+      {_lead_timeline(result)}
+      <div class="panel">
+        <h3>Per-challenge breakdown</h3>
+        <table>
+          <thead><tr><th>Challenge focus</th><th>{one_name}</th><th>{two_name}</th><th>Winner</th></tr></thead>
+          <tbody>{''.join(challenge_rows)}</tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Round log</h3>
+        <table>
+          <thead><tr><th>Round</th><th>Challenge focus</th><th>{one_name}</th><th>{two_name}</th><th>Margin</th><th>Winner</th></tr></thead>
           <tbody>{''.join(round_rows)}</tbody>
         </table>
       </div>
-      <div class="panel">JSON API: <code>/api/ai-battle?one={html.escape(result.ai_one.name)}&amp;two={html.escape(result.ai_two.name)}&amp;rounds={len(result.rounds)}</code></div>
+      <div class="panel">JSON API: <code>/api/ai-battle?one={one_name}&amp;two={two_name}&amp;rounds={len(result.rounds)}&amp;seed={html.escape(result.seed)}</code></div>
     """
-    return _page("GreyNOC DMZ - AI Battle", body)
+    return _page("GreyNOC DMZ - AI Battle", body, role=role)
 
 
-def render_coverage(coverage: CoverageReport) -> str:
+def render_coverage(coverage: CoverageReport, role: Role = Role.admin) -> str:
     covered, total = coverage.tactic_coverage_ratio
     tactic_rows = []
     for tactic in coverage.tactics:
@@ -534,10 +696,10 @@ def render_coverage(coverage: CoverageReport) -> str:
       </div>
       <div class="panel">Rules without a MITRE mapping: <code>{unmapped}</code>. JSON API: <code>/api/coverage</code></div>
     """
-    return _page("GreyNOC DMZ - Coverage", body)
+    return _page("GreyNOC DMZ - Coverage", body, role=role)
 
 
-def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
+def render_scenario_detail(result: ScenarioResult, auth_enabled: bool, role: Role) -> str:
     status = "PASS" if result.passed else "FAIL"
     alert_rows = []
     for alert in result.alerts:
@@ -595,11 +757,12 @@ def render_scenario_detail(result: ScenarioResult, auth_enabled: bool) -> str:
         </table>
       </div>
     """
-    return _page(f"GreyNOC DMZ - {result.scenario_id}", body)
+    return _page(f"GreyNOC DMZ - {result.scenario_id}", body, role=role)
 
 
 def serve(root: Path, host: str, port: int) -> None:
     DashboardHandler.root = root
     DashboardHandler.auth_config = load_auth_config()
+    DashboardHandler.sessions = SessionStore()
     server = ThreadingHTTPServer((host, port), DashboardHandler)
     server.serve_forever()

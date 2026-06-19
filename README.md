@@ -133,20 +133,48 @@ Generated local history is written under `.dmz/` and ignored by git.
 
 ## AI battle arena
 
-The AI battle arena puts two named AI profiles into a deterministic local contest. Each profile gets generated tactical stats, chooses from safe SOC-style strategies, and competes across synthetic challenges such as telemetry triage, containment, evidence handling, rule adaptation, false-positive reduction, and recovery prioritization.
+The AI battle arena puts two named AI profiles into a deterministic local contest.
+Each profile gets generated tactical stats and competes across six synthetic SOC
+challenges — telemetry triage, containment, analyst handoff, rule adaptation,
+false-positive control, and recovery under pressure.
 
-Available strategies:
+The scoring is mechanical, not cosmetic:
 
-- `balanced`
-- `aggressive`
-- `defensive`
-- `adaptive`
-- `analyst`
+- **Each challenge weights the three stats differently.** Containment rewards
+  defense, recovery-under-pressure rewards aggression, rule adaptation rewards
+  adaptability, and so on. The challenge shown for a round is the one that drove
+  the score.
+- **Identity sets power, strategy sets shape.** Base stats are seeded from the
+  fighter name. A strategy applies a zero-sum modifier on top, so picking a
+  strategy reshapes a fighter without changing its total power. Strategy is a
+  real, isolated lever rather than a hidden reroll.
+- **The objective rewards a stat.** Keywords in the objective (e.g. "evidence"
+  → defense, "dominance" → aggression, "adapt" → adaptability) give a small
+  per-round bonus on that stat; any other text is hashed to a stat deterministically.
+- **Rounds are coupled by momentum.** A trailing fighter claws back in proportion
+  to its adaptability, so leads can swing and comebacks happen.
+- **An optional `--seed` runs a varied rematch** while keeping every result
+  reproducible for the same inputs.
+
+Available strategies (each is a zero-sum trade-off):
+
+- `balanced` — no trade-off, no weakness
+- `aggressive` — more aggression, less defense and adaptability
+- `defensive` — more defense, less aggression and adaptability
+- `adaptive` — more adaptability (and stronger momentum), less aggression and defense
+- `analyst` — more defense and adaptability, less aggression
+
+Both the CLI and the dashboard report match statistics beyond the winner: round
+record, average and best round, score consistency, longest win streak, lead
+changes, a cumulative lead timeline, largest and closest margins, a per-challenge
+breakdown, a decisiveness rating (blowout / clear / narrow / coin-flip), the
+power-based prediction, and whether the result was an upset or a comeback.
 
 CLI example:
 
 ```bash
-greynoc-dmz ai-battle --ai-one Sentinel --ai-two Phantom --rounds 7 --objective "Own the SOC workflow without losing evidence"
+greynoc-dmz ai-battle --ai-one Sentinel --ai-two Phantom --rounds 7 \
+  --objective "Own the SOC workflow without losing evidence" --seed rematch-1
 ```
 
 Dashboard route:
@@ -155,10 +183,10 @@ Dashboard route:
 http://127.0.0.1:8787/ai-battle
 ```
 
-JSON API example:
+JSON API example (now returns a full `stats` block):
 
 ```text
-http://127.0.0.1:8787/api/ai-battle?one=Sentinel&two=Phantom&rounds=5&one_strategy=balanced&two_strategy=adaptive
+http://127.0.0.1:8787/api/ai-battle?one=Sentinel&two=Phantom&rounds=5&one_strategy=balanced&two_strategy=adaptive&seed=rematch-1
 ```
 
 This feature is intentionally synthetic. It does not launch tools, attack systems, or run autonomous offensive activity.
