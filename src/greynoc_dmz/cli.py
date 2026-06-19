@@ -122,28 +122,84 @@ def ai_battle_cmd(
     objective: Annotated[str, typer.Option("--objective")] = "Establish operational dominance in a synthetic SOC exercise.",
     ai_one_strategy: Annotated[str, typer.Option("--ai-one-strategy")] = "balanced",
     ai_two_strategy: Annotated[str, typer.Option("--ai-two-strategy")] = "adaptive",
+    seed: Annotated[str, typer.Option("--seed", help="Optional rematch seed for a varied outcome.")] = "",
 ) -> None:
-    result = simulate_battle(ai_one, ai_two, rounds, objective, ai_one_strategy, ai_two_strategy)
+    result = simulate_battle(
+        ai_one, ai_two, rounds, objective, ai_one_strategy, ai_two_strategy, seed
+    )
+    stats = result.stats
+    one = result.ai_one
+    two = result.ai_two
+
+    fighters = Table(title="Fighters")
+    fighters.add_column("AI")
+    fighters.add_column("Strategy")
+    fighters.add_column("Agg", justify="right")
+    fighters.add_column("Def", justify="right")
+    fighters.add_column("Adapt", justify="right")
+    fighters.add_column("Power", justify="right")
+    for profile in (one, two):
+        fighters.add_row(
+            profile.name,
+            profile.strategy,
+            str(profile.aggression),
+            str(profile.defense),
+            str(profile.adaptability),
+            str(profile.power),
+        )
+    console.print(fighters)
 
     table = Table(title="GreyNOC DMZ AI Battle")
     table.add_column("Round")
-    table.add_column("Challenge")
-    table.add_column(result.ai_one.name)
-    table.add_column(result.ai_two.name)
+    table.add_column("Challenge focus")
+    table.add_column(one.name, justify="right")
+    table.add_column(two.name, justify="right")
+    table.add_column("Margin", justify="right")
     table.add_column("Winner")
-
     for battle_round in result.rounds:
         table.add_row(
             str(battle_round.round_number),
-            battle_round.challenge,
+            battle_round.focus,
             str(battle_round.ai_one_score),
             str(battle_round.ai_two_score),
+            f"{battle_round.margin:+d}",
             battle_round.winner,
         )
-
     console.print(table)
-    console.print(f"{result.ai_one.name}: {result.ai_one_total}")
-    console.print(f"{result.ai_two.name}: {result.ai_two_total}")
+
+    stats_table = Table(title="Battle stats")
+    stats_table.add_column("Metric")
+    stats_table.add_column(one.name, justify="right")
+    stats_table.add_column(two.name, justify="right")
+    stats_table.add_row("Total score", str(result.ai_one_total), str(result.ai_two_total))
+    stats_table.add_row("Round wins", str(stats.ai_one_round_wins), str(stats.ai_two_round_wins))
+    stats_table.add_row("Avg / round", str(stats.ai_one_avg), str(stats.ai_two_avg))
+    stats_table.add_row(
+        "Consistency (lower=steadier)",
+        str(stats.ai_one_consistency),
+        str(stats.ai_two_consistency),
+    )
+    stats_table.add_row("Best round", str(stats.ai_one_best_round), str(stats.ai_two_best_round))
+    stats_table.add_row(
+        "Longest streak", str(stats.ai_one_longest_streak), str(stats.ai_two_longest_streak)
+    )
+    stats_table.add_row(
+        "Dominance share %", str(stats.dominance_share_one), str(stats.dominance_share_two)
+    )
+    console.print(stats_table)
+
+    console.print(
+        f"draws: {stats.draws}  |  lead changes: {stats.lead_changes}  |  "
+        f"decisiveness: {stats.decisiveness}"
+    )
+    console.print(
+        f"largest margin: {stats.largest_margin}  |  closest margin: {stats.closest_margin}  |  "
+        f"objective rewards: {result.emphasis}"
+    )
+    predicted = f"predicted by power: {stats.predicted_winner}"
+    console.print(predicted + ("  [UPSET]" if stats.upset else ""))
+    if stats.comeback_winner:
+        console.print(f"comeback: {stats.comeback_winner} won after trailing")
     console.print(f"winner: {result.winner}")
     console.print(result.summary)
 
