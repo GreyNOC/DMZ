@@ -6,7 +6,7 @@ The app replays known events, runs detection rules, compares expected alerts wit
 
 ## Status
 
-Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, working outbound integration adapters (file, webhook, Splunk HEC, Jira), a vendor-neutral AI provider layer, training-data export, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Inbound telemetry adapters and provider-specific EDR adapters are planned.
+Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, local authentication, API status endpoint, working outbound integration adapters (file, webhook, Splunk HEC, Jira), a multi-provider AI layer (OpenAI-compatible, Anthropic, Gemini) with a live AI battle arena, training-data export, tests, Docker build, CI workflow, scheduled bot workflow, and production readiness checklist are included. Inbound telemetry adapters and provider-specific EDR adapters are planned.
 
 ## What this repo is for
 
@@ -17,6 +17,7 @@ Production-oriented scaffold. The core CLI, rule engine, reports, dashboard, loc
 - Producing evidence bundles, history records, and validation reports
 - Reviewing validation status in a clean system-manager style dashboard
 - Preparing controlled integrations with SIEM, EDR, ticketing, and cloud systems
+- Pitting real AI models (Claude, GPT, Gemini, or local) against each other on synthetic SOC challenges
 
 ## What this repo is not for
 
@@ -39,6 +40,7 @@ greynoc-dmz integration-check
 greynoc-dmz validate-all
 greynoc-dmz integration-publish
 greynoc-dmz ai-check
+greynoc-dmz ai-roster
 greynoc-dmz export-dataset
 
 greynoc-dmz dashboard --host 127.0.0.1 --port 8787
@@ -215,11 +217,14 @@ greynoc-dmz collab-battle --teams "Red=Claude,GPT;Blue=Gemini" --judge Claude --
 
 Live and collaborative battles make outbound provider calls and require
 `--allow-external` for hosted endpoints (local endpoints need no allowance). They
-can be run from the CLI or from the dashboard at `/live-battle` (engineer/admin
-role), which renders the scoreboard, round log, and judge rationale in the
-classic system-manager style. The read-only `/roster` status view never contacts
-a provider. See `docs/ai-providers.md` for the full roster format, provider
-configuration, and safety model.
+run from the CLI or from the dashboard at `/live-battle` (engineer/admin role).
+The dashboard runs each battle in a background worker and shows a live-updating
+progress page (no JavaScript, so the strict no-script policy stays intact) —
+rounds appear as they complete, then the page settles on the scoreboard, round
+log, and judge rationale in the classic system-manager style. A battle is refused
+before it starts if a fighter or judge is not ready. The read-only `/roster`
+status view never contacts a provider. See `docs/ai-providers.md` for the full
+roster format, provider configuration, and safety model.
 
 ## MITRE ATT&CK coverage
 
@@ -353,9 +358,9 @@ Generated datasets are written under `datasets/` and are not committed. See
 
 ## Dashboard
 
-The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, MITRE ATT&CK tactic coverage, recent validation history, scenario detail pages, a coverage map, and the AI battle arena.
+The dashboard uses a clean old-Windows/system-manager style. It shows scenario totals, alert count, MITRE ATT&CK tactic coverage, recent validation history, scenario detail pages, a coverage map, the simulated AI battle arena, the AI roster, and a live AI battle arena that runs real models in the background.
 
-The dashboard is local-first and read-only: `GET` requests recompute results in memory but never write evidence or history. It serves static HTML and small JSON endpoints, and sets basic browser security headers.
+The dashboard is local-first: `GET` requests recompute results in memory, never write evidence or history, and never make outbound calls. The handful of state-changing actions are explicit `POST` routes gated by role — running validation, and starting a live or collaborative battle (which additionally requires an allow-external opt-in). It serves static HTML and small JSON endpoints, sets basic browser security headers, and runs under a strict no-JavaScript Content-Security-Policy.
 
 ## Role model
 
