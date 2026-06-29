@@ -21,6 +21,7 @@ class AIConfig:
     token_env: str | None = None
     timeout_seconds: int = 30
     temperature: float = 0.2
+    max_tokens: int = 1024
     allow_external: bool = False
 
 
@@ -35,9 +36,10 @@ def _opt(name: str) -> str | None:
 
 def _int_env(name: str, default: int) -> int:
     raw = os.environ.get(name, "").strip()
-    if raw.lstrip("-").isdigit():
+    try:
         return int(raw)
-    return default
+    except ValueError:
+        return default
 
 
 def _float_env(name: str, default: float) -> float:
@@ -61,5 +63,6 @@ def load_ai_config() -> AIConfig:
         token_env=_opt("GREYNOC_DMZ_AI_TOKEN_ENV"),
         timeout_seconds=_int_env("GREYNOC_DMZ_AI_TIMEOUT_SECONDS", 30),
         temperature=_float_env("GREYNOC_DMZ_AI_TEMPERATURE", 0.2),
+        max_tokens=_int_env("GREYNOC_DMZ_AI_MAX_TOKENS", 1024),
         allow_external=_flag("GREYNOC_DMZ_AI_ALLOW_EXTERNAL"),
     )

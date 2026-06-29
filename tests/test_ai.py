@@ -62,6 +62,16 @@ def test_config_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.temperature == 0.5
 
 
+def test_malformed_int_env_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GREYNOC_DMZ_AI_MAX_TOKENS", "--5")
+    monkeypatch.setenv("GREYNOC_DMZ_AI_TIMEOUT_SECONDS", "oops")
+
+    config = load_ai_config()
+
+    assert config.max_tokens == 1024
+    assert config.timeout_seconds == 30
+
+
 def test_disabled_config_reports_disabled() -> None:
     assert check_ai_readiness(AIConfig()).status == AIReadinessStatus.disabled
 

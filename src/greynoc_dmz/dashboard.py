@@ -7,7 +7,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .access import Role, can
-from .ai import AIReadiness, check_ai_readiness, load_ai_config
+from .ai import (
+    AIReadiness,
+    Fighter,
+    check_ai_readiness,
+    check_fighter_readiness,
+    load_ai_config,
+    load_roster,
+)
+from .ai.roster import ROSTER_RELATIVE_PATH
 from .ai_battle import BattleResult, simulate_battle
 from .auth import (
     AuthConfig,
@@ -39,6 +47,8 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     "/api/coverage": "rule:read",
     "/ai-battle": "rule:test",
     "/api/ai-battle": "rule:test",
+    "/roster": "rule:test",
+    "/api/roster": "rule:test",
     "/validate": "scenario:run",
 }
 
@@ -120,6 +130,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/ai-battle":
             params = parse_qs(parsed.query)
             self._send_json(_battle_from_params(params).to_dict())
+            return
+        if parsed.path == "/roster":
+            role = self._effective_role()
+            if role is None:
+                self.send_error(403, "insufficient role")
+                return
+            self._send_html(render_roster(_roster_status(self.root), role))
+            return
+        if parsed.path == "/api/roster":
+            self._send_json(
+                {
+                    "fighters": [
+                        {**fighter.to_dict(), "status": readiness.status.value}
+                        for fighter, readiness in _roster_status(self.root)
+                    ]
+                }
+            )
             return
         if parsed.path == "/api/status":
             results = validate_all(self.root, persist=False)
@@ -269,6 +296,12 @@ def _battle_from_params(params: dict[str, list[str]]) -> BattleResult:
     )
 
 
+def _roster_status(root: Path) -> list[tuple[Fighter, AIReadiness]]:
+    """Readiness of each configured fighter. Never contacts a provider."""
+    fighters = load_roster(root / ROSTER_RELATIVE_PATH)
+    return [(fighter, check_fighter_readiness(fighter)) for fighter in fighters]
+
+
 def _menu(role: Role | None) -> str:
     if role is None:
         return '<span>Login</span>'
@@ -278,6 +311,8 @@ def _menu(role: Role | None) -> str:
         items.append('<a href="/coverage">Coverage</a>')
     if can(role, "rule:test"):
         items.append('<a href="/ai-battle">AI Battle</a>')
+    if can(role, "rule:test"):
+        items.append('<a href="/roster">AI Roster</a>')
     if can(role, "dashboard:read"):
         items.append('<a href="/api/status">API</a>')
     items.append('<a href="/logout">Logout</a>')
@@ -653,6 +688,42 @@ def render_ai_battle(result: BattleResult, role: Role = Role.admin) -> str:
       <div class="panel">JSON API: <code>/api/ai-battle?one={one_name}&amp;two={two_name}&amp;rounds={len(result.rounds)}&amp;seed={html.escape(result.seed)}</code></div>
     """
     return _page("GreyNOC DMZ - AI Battle", body, role=role)
+
+
+def render_roster(
+    statuses: list[tuple[Fighter, AIReadiness]], role: Role = Role.admin
+) -> str:
+    rows = []
+    for fighter, readiness in statuses:
+        status_class = "pass" if readiness.status.value == "ready" else "fail"
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(fighter.name)}</td>"
+            f"<td>{html.escape(fighter.provider)}</td>"
+            f"<td>{html.escape(fighter.model or 'not set')}</td>"
+            f"<td>{html.escape(fighter.token_env or 'none')}</td>"
+            f"<td>{'external' if readiness.external else 'local'}</td>"
+            f"<td><span class='status {status_class}'>{html.escape(readiness.status.value)}</span></td>"
+            f"<td>{html.escape(readiness.detail)}</td>"
+            "</tr>"
+        )
+
+    body = f"""
+      <div class="panel">
+        <h3>AI battle roster</h3>
+        <p>Fighters that can be fielded in a live or collaborative battle. API keys
+        are referenced only by environment-variable name and are read at call time.
+        Live battles run from the CLI (<code>greynoc-dmz live-battle</code>,
+        <code>greynoc-dmz collab-battle</code>) because they make outbound provider
+        calls; this view never contacts a provider.</p>
+        <table>
+          <thead><tr><th>Name</th><th>Provider</th><th>Model</th><th>Key env</th><th>Endpoint</th><th>Status</th><th>Detail</th></tr></thead>
+          <tbody>{''.join(rows) or '<tr><td colspan="7">No fighters configured. Add them to configs/ai-roster.json.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="panel">JSON API: <code>/api/roster</code>. External endpoints show as blocked until a battle is run with <code>--allow-external</code>.</div>
+    """
+    return _page("GreyNOC DMZ - AI Roster", body, role=role)
 
 
 def render_coverage(coverage: CoverageReport, role: Role = Role.admin) -> str:

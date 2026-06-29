@@ -1,0 +1,31 @@
+{
+  "_comment": "AI battle arena roster. Each fighter is a provider config with a name. API keys are referenced only by environment-variable name (token_env), never stored here, so this file is safe to commit. Hosted providers are external endpoints: a battle only reaches them when run with --allow-external (or GREYNOC_DMZ_AI_ALLOW_EXTERNAL=1). Supported providers: openai_compatible, anthropic, gemini. base_url is optional for anthropic and gemini (sane defaults are used).",
+  "fighters": [
+    {
+      "name": "Claude",
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "token_env": "ANTHROPIC_API_KEY",
+      "max_tokens": 1024
+    },
+    {
+      "name": "GPT",
+      "provider": "openai_compatible",
+      "model": "gpt-4.1-mini",
+      "base_url": "https://api.openai.com/v1",
+      "token_env": "OPENAI_API_KEY"
+    },
+    {
+      "name": "Gemini",
+      "provider": "gemini",
+      "model": "gemini-2.0-flash",
+      "token_env": "GEMINI_API_KEY"
+    },
+    {
+      "name": "Local",
+      "provider": "openai_compatible",
+      "model": "llama3.1",
+      "base_url": "http://localhost:11434/v1"
+    }
+  ]
+}

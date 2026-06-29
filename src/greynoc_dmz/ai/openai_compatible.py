@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 
-from ..integrations.safety import SafetyPolicy, check_endpoint
-from ..integrations.transport import TransportError, post_json
 from .config import AIConfig
+from .http import ensure_endpoint_allowed, post_and_read
 from .models import AIProviderError, AIResponse
 
 
@@ -31,11 +30,8 @@ class OpenAICompatibleProvider:
             raise AIProviderError("AI model is not configured")
         model = config.model
 
-        verdict = check_endpoint(
-            base, SafetyPolicy(allow_external=config.allow_external, allowlist=frozenset())
-        )
-        if not verdict.allowed:
-            raise AIProviderError(f"AI endpoint blocked: {verdict.reason}")
+        url = f"{base}/chat/completions"
+        ensure_endpoint_allowed(url, config)
 
         messages: list[dict[str, str]] = []
         if system:
@@ -50,21 +46,8 @@ class OpenAICompatibleProvider:
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
 
-        try:
-            response = post_json(
-                f"{base}/chat/completions",
-                payload,
-                headers=headers,
-                timeout=config.timeout_seconds,
-                verify_tls=True,
-            )
-        except TransportError as error:
-            raise AIProviderError(str(error)) from error
-
-        if not response.ok:
-            snippet = response.body.strip().replace("\n", " ")[:200]
-            raise AIProviderError(f"provider returned HTTP {response.status}: {snippet}")
-        return _parse_completion(response.body, config.provider, model)
+        body = post_and_read(url, payload, headers, config)
+        return _parse_completion(body, config.provider, model)
 
 
 def _parse_completion(body: str, provider: str, model: str) -> AIResponse:

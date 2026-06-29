@@ -191,6 +191,34 @@ http://127.0.0.1:8787/api/ai-battle?one=Sentinel&two=Phantom&rounds=5&one_strate
 
 This feature is intentionally synthetic. It does not launch tools, attack systems, or run autonomous offensive activity.
 
+### Live battle arena (real AI models)
+
+The simulation above runs offline. The live arena instead fields **real AI
+models** — load any API key from any provider, register them as fighters, and
+have them battle for real on the same synthetic SOC challenges, scored by a live
+AI judge.
+
+Fighters live in `configs/ai-roster.json`. Each is a provider config with a name;
+API keys are referenced only by environment-variable name, so the roster is safe
+to commit. Supported providers: `openai_compatible` (OpenAI, Azure, Ollama, LM
+Studio, vLLM), `anthropic` (Claude), and `gemini` (Google).
+
+```bash
+greynoc-dmz ai-roster                       # list fighters and readiness
+
+# Head-to-head: each model answers each challenge; an AI judge scores them
+greynoc-dmz live-battle --fighters Claude,GPT --judge Gemini --rounds 5 --allow-external
+
+# Collaborative teams: teammates build on each other, then teams are judged
+greynoc-dmz collab-battle --teams "Red=Claude,GPT;Blue=Gemini" --judge Claude --allow-external
+```
+
+Live and collaborative battles make outbound provider calls, so they run from the
+CLI and require `--allow-external` for hosted endpoints (local endpoints need no
+allowance). The dashboard shows a read-only roster status at `/roster` but never
+contacts a provider. See `docs/ai-providers.md` for the full roster format,
+provider configuration, and safety model.
+
 ## MITRE ATT&CK coverage
 
 `greynoc-dmz coverage` maps every detection rule onto the enterprise ATT&CK tactic
@@ -280,9 +308,10 @@ Integrations are disabled by default. External endpoints are blocked unless
 
 ## AI providers
 
-Teams can plug in their own AI provider (hosted or local) for advisory analysis
-of detection-validation results. AI is disabled by default and is configured
-entirely through `GREYNOC_DMZ_AI_*` environment variables.
+Teams can plug in their own AI providers (hosted or local) for advisory analysis
+of detection-validation results and for the live battle arena. AI is disabled by
+default for advisory review and configured through `GREYNOC_DMZ_AI_*`
+environment variables.
 
 ```bash
 greynoc-dmz ai-check          # report AI readiness (no provider call)
@@ -290,11 +319,18 @@ greynoc-dmz ai-check --live   # confirm connectivity with one live call
 greynoc-dmz ai-review         # AI advisory review of validation results
 ```
 
-The `openai_compatible` adapter covers the OpenAI API, Azure OpenAI, and local
-servers (Ollama, LM Studio, vLLM). API keys are read from a named environment
-variable at call time, never stored in config or git. External provider
-endpoints are blocked unless `GREYNOC_DMZ_AI_ALLOW_EXTERNAL=true`, and AI output
-is advisory only. See `docs/ai-providers.md` for configuration and safety.
+Three vendor-neutral adapters are built in:
+
+- `openai_compatible` — OpenAI API, Azure OpenAI, and local servers (Ollama, LM
+  Studio, vLLM)
+- `anthropic` — Anthropic's Claude Messages API
+- `gemini` — Google Gemini
+
+API keys are read from a named environment variable at call time, never stored
+in config or git, and never appear in logs or error messages. External provider
+endpoints are blocked unless external access is explicitly allowed, and advisory
+AI output never runs commands or changes a rule. See `docs/ai-providers.md` for
+configuration and safety.
 
 ## Training data
 

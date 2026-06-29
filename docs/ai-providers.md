@@ -13,13 +13,18 @@ never depends on it, and AI is disabled by default.
 
 ## Supported providers
 
-The `openai_compatible` adapter works with any service that exposes an
-OpenAI-style `/chat/completions` API:
+Three vendor-neutral adapters cover the major AI APIs. Every adapter goes through
+the same endpoint safety gate and credential-safe transport, so an API key can
+never leak into a log or error message regardless of provider.
 
-- OpenAI API
-- Azure OpenAI (configured with a matching base URL)
-- Local model servers — Ollama, LM Studio, vLLM
-- Other hosted providers with a compatible request/response shape
+| Provider value | API | Notes |
+|---|---|---|
+| `openai_compatible` (alias `openai`) | OpenAI-style `/chat/completions` | OpenAI, Azure OpenAI, and local servers (Ollama, LM Studio, vLLM) |
+| `anthropic` (alias `claude`) | Anthropic Messages API (`/v1/messages`) | `x-api-key` auth; `base_url` defaults to `https://api.anthropic.com`. Sampling temperature is omitted so every current Claude model is supported |
+| `gemini` (alias `google`) | Google Gemini `generateContent` | Key sent in the `x-goog-api-key` header (never the URL); `base_url` defaults to the Generative Language API |
+
+`base_url` is optional for `anthropic` and `gemini` (a sensible default is used)
+and required for `openai_compatible`.
 
 ## Configuration
 
@@ -33,6 +38,7 @@ OpenAI-style `/chat/completions` API:
 | `GREYNOC_DMZ_AI_ALLOW_EXTERNAL` | Permit non-local provider endpoints | `false` |
 | `GREYNOC_DMZ_AI_TIMEOUT_SECONDS` | Request timeout | `30` |
 | `GREYNOC_DMZ_AI_TEMPERATURE` | Sampling temperature | `0.2` |
+| `GREYNOC_DMZ_AI_MAX_TOKENS` | Max response tokens (used by Anthropic) | `1024` |
 
 The API key is never named in DMZ config or git. `GREYNOC_DMZ_AI_TOKEN_ENV`
 holds the *name* of a separate environment variable, and DMZ reads the key from
@@ -61,6 +67,67 @@ export GREYNOC_DMZ_AI_MODEL=llama3.1
 
 A local endpoint needs no API key and no external allowance.
 
+### Anthropic (Claude)
+
+```bash
+export GREYNOC_DMZ_AI_ENABLED=true
+export GREYNOC_DMZ_AI_PROVIDER=anthropic
+export GREYNOC_DMZ_AI_MODEL=claude-opus-4-8
+export GREYNOC_DMZ_AI_TOKEN_ENV=ANTHROPIC_API_KEY
+export GREYNOC_DMZ_AI_ALLOW_EXTERNAL=true
+export ANTHROPIC_API_KEY=replace-me-outside-git
+```
+
+### Google Gemini
+
+```bash
+export GREYNOC_DMZ_AI_ENABLED=true
+export GREYNOC_DMZ_AI_PROVIDER=gemini
+export GREYNOC_DMZ_AI_MODEL=gemini-2.0-flash
+export GREYNOC_DMZ_AI_TOKEN_ENV=GEMINI_API_KEY
+export GREYNOC_DMZ_AI_ALLOW_EXTERNAL=true
+export GEMINI_API_KEY=replace-me-outside-git
+```
+
+## Battle arena: roster and live battles
+
+Beyond single-provider advisory review, DMZ can field many named AI fighters at
+once and pit them against each other on synthetic SOC challenges, with a live AI
+model acting as the judge.
+
+A **roster** lists fighters in `configs/ai-roster.json`. Each fighter is a
+provider config with a name; like everything else, API keys are referenced only
+by environment-variable name, so the roster is safe to commit:
+
+```json
+{
+  "fighters": [
+    {"name": "Claude", "provider": "anthropic", "model": "claude-opus-4-8", "token_env": "ANTHROPIC_API_KEY"},
+    {"name": "GPT", "provider": "openai_compatible", "model": "gpt-4.1-mini", "base_url": "https://api.openai.com/v1", "token_env": "OPENAI_API_KEY"},
+    {"name": "Gemini", "provider": "gemini", "model": "gemini-2.0-flash", "token_env": "GEMINI_API_KEY"},
+    {"name": "Local", "provider": "openai_compatible", "model": "llama3.1", "base_url": "http://localhost:11434/v1"}
+  ]
+}
+```
+
+```bash
+greynoc-dmz ai-roster                       # list fighters and per-fighter readiness
+greynoc-dmz ai-roster --allow-external      # readiness as if external endpoints were permitted
+
+# Head-to-head: real models answer each challenge, an AI judge scores them
+greynoc-dmz live-battle --fighters Claude,GPT --judge Gemini --rounds 5 --allow-external
+
+# Collaborative teams: teammates build on each other, then teams are judged
+greynoc-dmz collab-battle --teams "Red=Claude,GPT;Blue=Gemini,Local" --judge Claude --allow-external
+```
+
+Both battle commands accept `--objective`, `--roster <path>`, and `--json`. The
+judge defaults to a roster fighter that is not a combatant. Live and collaborative
+battles make outbound provider calls, so they run from the CLI (never the
+read-only dashboard) and require `--allow-external` for hosted providers. The
+dashboard exposes a read-only roster status view at `/roster` and `/api/roster`
+that reports readiness without contacting any provider.
+
 ## Safety model
 
 - AI is disabled unless `GREYNOC_DMZ_AI_ENABLED` is truthy.
@@ -78,10 +145,12 @@ A local endpoint needs no API key and no external allowance.
 greynoc-dmz ai-check          # report AI readiness (no provider call)
 greynoc-dmz ai-check --live   # confirm connectivity with one live call
 greynoc-dmz ai-review         # AI advisory review of validation results
+greynoc-dmz ai-roster         # list battle-arena fighters and readiness
+greynoc-dmz live-battle       # real head-to-head AI battle, judged live
+greynoc-dmz collab-battle     # collaborative team AI battle, judged live
 ```
 
 ## Planned
 
-- Anthropic and Google Gemini provider adapters
 - AI-assisted report appendices
 - Export of AI-reviewed scenario runs as model-training datasets

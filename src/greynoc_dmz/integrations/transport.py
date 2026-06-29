@@ -7,6 +7,20 @@ import urllib.request
 from dataclasses import dataclass
 
 
+class _NoFollowRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect handler that never follows redirects.
+
+    The endpoint safety gate validates only the URL it is given. If the
+    transport silently followed a 3xx, the credential headers would be re-sent to
+    an unvalidated host — defeating both the isolation gate and credential safety.
+    Returning ``None`` makes urllib surface the redirect as an ``HTTPError``,
+    which callers treat as a normal non-2xx response and reject.
+    """
+
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
 class TransportError(RuntimeError):
     """Raised when an HTTP request fails before a response is received.
 
@@ -51,8 +65,15 @@ def post_json(
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
 
+    # A per-request opener that refuses redirects (so credentials are never
+    # re-sent to an unvalidated host) while preserving the chosen TLS context.
+    handlers: list[urllib.request.BaseHandler] = [_NoFollowRedirect()]
+    if context is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    opener = urllib.request.build_opener(*handlers)
+
     try:
-        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+        with opener.open(request, timeout=timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
             return HttpResponse(status=response.status, body=body)
     except urllib.error.HTTPError as error:

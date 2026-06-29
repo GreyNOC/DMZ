@@ -59,7 +59,12 @@ def classify_host(host: str) -> EndpointScope:
         return EndpointScope.external
     if address.is_loopback:
         return EndpointScope.local
-    if address.is_private or address.is_link_local:
+    # Link-local includes the cloud metadata range (169.254.169.254, fd00:ec2::254).
+    # Treat it as external so it requires explicit allowance instead of being a
+    # trusted lab endpoint — closing an SSRF-to-metadata path.
+    if address.is_link_local:
+        return EndpointScope.external
+    if address.is_private:
         return EndpointScope.private
     return EndpointScope.external
 
