@@ -8,7 +8,6 @@ from urllib.parse import parse_qs, urlparse
 
 from .access import Role, can
 from .ai import (
-    AIProviderError,
     AIReadiness,
     Fighter,
     check_ai_readiness,
@@ -36,6 +35,14 @@ from .auth import (
     parse_cookie,
     verify_login,
 )
+from .battle_jobs import (
+    JOBS,
+    MODE_LIVE,
+    STATUS_DONE,
+    STATUS_ERROR,
+    BattleJobView,
+    BattleRound,
+)
 from .config import load_lab_config
 from .correlation import correlate
 from .coverage import CoverageReport, coverage_for_root
@@ -46,8 +53,6 @@ from .live_battle import (
     DEFAULT_LIVE_OBJECTIVE,
     CollaborativeBattleResult,
     LiveBattleResult,
-    run_collaborative_battle,
-    run_live_battle,
 )
 from .models import ScenarioResult
 from .reporting import write_report
@@ -68,6 +73,8 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     "/roster": "rule:test",
     "/api/roster": "rule:test",
     "/live-battle": "rule:test",
+    "/battle": "rule:test",
+    "/api/battle": "rule:test",
     "/run-battle": "rule:test",
     "/run-collab": "rule:test",
     "/validate": "scenario:run",
@@ -176,6 +183,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             self._send_html(render_live_battle_page(_roster_status(self.root), role))
             return
+        if parsed.path == "/battle":
+            role = self._effective_role()
+            if role is None:
+                self.send_error(403, "insufficient role")
+                return
+            view = JOBS.get(parse_qs(parsed.query).get("id", [""])[0])
+            if view is None:
+                self.send_error(404, "battle not found")
+                return
+            self._send_html(render_battle_progress(view, role))
+            return
+        if parsed.path == "/api/battle":
+            view = JOBS.get(parse_qs(parsed.query).get("id", [""])[0])
+            if view is None:
+                self.send_error(404, "battle not found")
+                return
+            self._send_json(_battle_job_json(view))
+            return
         if parsed.path == "/api/status":
             results = validate_all(self.root, persist=False)
             integration_checks = [
@@ -240,10 +265,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_error(403, "insufficient role")
                 return
             form = self._read_form()
-            if parsed.path == "/run-battle":
-                self._send_html(_run_live_from_form(self.root, form, role))
-            else:
-                self._send_html(_run_collab_from_form(self.root, form, role))
+            try:
+                if parsed.path == "/run-battle":
+                    job_id = _start_live_from_form(self.root, form)
+                else:
+                    job_id = _start_collab_from_form(self.root, form)
+            except _BattleSetupError as error:
+                self._send_html(render_live_battle_page(_roster_status(self.root), role, error=str(error)))
+                return
+            self._redirect(f"/battle?id={job_id}")
             return
         if parsed.path != "/login":
             self.send_error(404)
@@ -371,12 +401,13 @@ def _menu(role: Role | None) -> str:
     return "".join(items)
 
 
-def _page(title: str, body: str, role: Role | None = Role.admin) -> str:
+def _page(title: str, body: str, role: Role | None = Role.admin, head_extra: str = "") -> str:
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {head_extra}
   <title>{html.escape(title)}</title>
   <style>
     * {{ box-sizing: border-box; }}
@@ -407,6 +438,8 @@ def _page(title: str, body: str, role: Role | None = Role.admin) -> str:
     .form {{ max-width: 360px; }}
     .battle-form {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }}
     .error {{ color: #8a0000; }}
+    .bar {{ border: 1px solid #808080; background: white; height: 18px; padding: 1px; }}
+    .bar > div {{ height: 100%; background: linear-gradient(90deg, #0a246a, #a6caf0); }}
     @media (max-width: 800px) {{ .grid, .battle-form {{ grid-template-columns: 1fr 1fr; }} }}
   </style>
 </head>
@@ -828,10 +861,10 @@ def render_live_battle_page(
       <div class="panel">
         <h3>Live AI battle arena</h3>
         <p>Pit real AI models against each other. Each model answers synthetic SOC
-        challenges and a judge model scores them. Battles call external AI providers
-        and may take up to a minute. Tick <b>Allow external endpoints</b> for hosted
-        providers (local endpoints need no allowance). Do not expose this dashboard
-        to the internet.</p>
+        challenges and a judge model scores them. Battles run in the background on a
+        live-updating progress page, so a long battle never blocks the browser. Tick
+        <b>Allow external endpoints</b> for hosted providers (local endpoints need no
+        allowance). Do not expose this dashboard to the internet.</p>
       </div>
       {error_html}
       {result_html}
@@ -969,9 +1002,13 @@ def _collab_result_html(result: CollaborativeBattleResult) -> str:
     """
 
 
-def _run_live_from_form(root: Path, form: dict[str, list[str]], role: Role) -> str:
-    statuses = _roster_status(root)
-    roster = [fighter for fighter, _ in statuses]
+class _BattleSetupError(Exception):
+    """A battle could not be set up from the form (bad selection or not ready)."""
+
+
+def _start_live_from_form(root: Path, form: dict[str, list[str]]) -> str:
+    """Validate the form, build combatants, and start a background battle job."""
+    roster = [fighter for fighter, _ in _roster_status(root)]
     allow_external = bool(form.get("allow_external"))
     rounds = _form_int(form, "rounds", 3, 1, 10)
     objective = form.get("objective", [""])[0].strip() or DEFAULT_LIVE_OBJECTIVE
@@ -979,24 +1016,24 @@ def _run_live_from_form(root: Path, form: dict[str, list[str]], role: Role) -> s
     try:
         selected = select_fighters(roster, form.get("fighter", []))
         if len(selected) < 2:
-            raise ArenaError("select at least two fighters")
+            raise _BattleSetupError("select at least two fighters")
         judge_fighter = resolve_judge(roster, selected, judge_name)
-        not_ready = unready_fighters([*selected, judge_fighter], allow_external)
-        if not_ready:
-            return render_live_battle_page(statuses, role, error=_not_ready_message(not_ready, allow_external))
-        combatants = [to_combatant(fighter, allow_external) for fighter in selected]
-        judge = to_combatant(judge_fighter, allow_external)
-        result = run_live_battle(combatants, judge, objective, rounds)
-    except ValueError as error:
-        return render_live_battle_page(statuses, role, error=str(error))
-    except AIProviderError as error:
-        return render_live_battle_page(statuses, role, error=f"battle failed: {error}")
-    return render_live_battle_page(statuses, role, result_html=_live_battle_result_html(result))
+    except ArenaError as error:
+        raise _BattleSetupError(str(error)) from error
+    not_ready = unready_fighters([*selected, judge_fighter], allow_external)
+    if not_ready:
+        raise _BattleSetupError(_not_ready_message(not_ready, allow_external))
+    combatants = [to_combatant(fighter, allow_external) for fighter in selected]
+    judge = to_combatant(judge_fighter, allow_external)
+    label: dict[str, object] = {
+        "fighters": [fighter.name for fighter in selected],
+        "judge": judge_fighter.name,
+    }
+    return JOBS.create_live(label, combatants, judge, objective, rounds)
 
 
-def _run_collab_from_form(root: Path, form: dict[str, list[str]], role: Role) -> str:
-    statuses = _roster_status(root)
-    roster = [fighter for fighter, _ in statuses]
+def _start_collab_from_form(root: Path, form: dict[str, list[str]]) -> str:
+    roster = [fighter for fighter, _ in _roster_status(root)]
     allow_external = bool(form.get("allow_external"))
     rounds = _form_int(form, "rounds", 3, 1, 10)
     objective = form.get("objective", [""])[0].strip() or DEFAULT_COLLAB_OBJECTIVE
@@ -1005,23 +1042,116 @@ def _run_collab_from_form(root: Path, form: dict[str, list[str]], role: Role) ->
         parsed = parse_teams(form.get("teams", [""])[0], roster)
         members = [fighter for _name, team_members in parsed for fighter in team_members]
         judge_fighter = resolve_judge(roster, members, judge_name)
-        not_ready = unready_fighters([*members, judge_fighter], allow_external)
-        if not_ready:
-            return render_live_battle_page(statuses, role, error=_not_ready_message(not_ready, allow_external))
-        battle_teams = [to_team(name, team_members, allow_external) for name, team_members in parsed]
-        judge = to_combatant(judge_fighter, allow_external)
-        result = run_collaborative_battle(battle_teams, judge, objective, rounds)
-    except ValueError as error:
-        return render_live_battle_page(statuses, role, error=str(error))
-    except AIProviderError as error:
-        return render_live_battle_page(statuses, role, error=f"battle failed: {error}")
-    return render_live_battle_page(statuses, role, result_html=_collab_result_html(result))
+    except ArenaError as error:
+        raise _BattleSetupError(str(error)) from error
+    not_ready = unready_fighters([*members, judge_fighter], allow_external)
+    if not_ready:
+        raise _BattleSetupError(_not_ready_message(not_ready, allow_external))
+    battle_teams = [to_team(name, team_members, allow_external) for name, team_members in parsed]
+    judge = to_combatant(judge_fighter, allow_external)
+    label: dict[str, object] = {
+        "teams": {name: [m.name for m in members] for name, members in parsed},
+        "judge": judge_fighter.name,
+    }
+    return JOBS.create_collab(label, battle_teams, judge, objective, rounds)
 
 
 def _not_ready_message(not_ready: list[tuple[str, str]], allow_external: bool) -> str:
     detail = "; ".join(f"{name} ({reason})" for name, reason in not_ready)
     hint = "" if allow_external else " Tick 'Allow external endpoints' for hosted providers."
     return f"Not ready: {detail}.{hint}"
+
+
+def _battle_job_json(view: BattleJobView) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": view.id,
+        "mode": view.mode,
+        "status": view.status,
+        "rounds_done": view.rounds_done,
+        "total_rounds": view.total_rounds,
+        "error": view.error,
+    }
+    if view.result is not None:
+        payload["result"] = view.result.to_dict()
+    return payload
+
+
+def _partial_rounds_table(partial: tuple[BattleRound, ...]) -> str:
+    rows = []
+    for battle_round in partial:
+        scores = ", ".join(
+            f"{html.escape(name)}: {score}" for name, score in battle_round.scores.items()
+        )
+        rows.append(
+            "<tr>"
+            f"<td>{battle_round.round_number}</td>"
+            f"<td>{html.escape(battle_round.focus)}</td>"
+            f"<td><span class='status win'>{html.escape(battle_round.winner)}</span></td>"
+            f"<td>{html.escape(scores)}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr><th>Round</th><th>Challenge</th><th>Winner</th><th>Scores</th></tr>"
+        f"</thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def render_battle_progress(view: BattleJobView, role: Role = Role.admin) -> str:
+    judge = html.escape(str(view.label.get("judge", "")))
+    if view.mode == MODE_LIVE:
+        fighters = view.label.get("fighters", [])
+        contenders = ", ".join(html.escape(str(name)) for name in fighters) if isinstance(fighters, list) else ""
+        contender_label = "Fighters"
+    else:
+        teams = view.label.get("teams", {})
+        contenders = (
+            "; ".join(
+                f"{html.escape(str(name))}=" + ", ".join(html.escape(str(m)) for m in members)
+                for name, members in teams.items()
+            )
+            if isinstance(teams, dict)
+            else ""
+        )
+        contender_label = "Teams"
+
+    head_extra = '<meta http-equiv="refresh" content="2">' if not view.finished else ""
+    percent = round(100 * view.rounds_done / view.total_rounds) if view.total_rounds else 0
+
+    if view.status == STATUS_DONE and view.result is not None:
+        result_html = (
+            _live_battle_result_html(view.result)
+            if isinstance(view.result, LiveBattleResult)
+            else _collab_result_html(view.result)
+        )
+        outcome = f"{result_html}<div class='panel'><a href='/live-battle'>Run another battle</a></div>"
+    elif view.status == STATUS_ERROR:
+        outcome = (
+            f"<div class='panel'><p class='error'>Battle failed: {html.escape(view.error)}</p>"
+            "<a href='/live-battle'>Back to Live Battle</a></div>"
+        )
+    else:
+        progressed = _partial_rounds_table(view.partial) if view.partial else "<p>Starting…</p>"
+        outcome = f"""
+          <div class="panel">
+            <p>Battle in progress — this page refreshes automatically. You can leave and
+            come back to <code>/battle?id={html.escape(view.id)}</code>.</p>
+            {progressed}
+          </div>
+        """
+
+    body = f"""
+      <div class="panel">
+        <h3>{'Battle' if view.mode == MODE_LIVE else 'Collaborative battle'} — {html.escape(view.status)}</h3>
+        <div class="bar"><div style="width:{percent}%"></div></div>
+        <p>Round {view.rounds_done} of {view.total_rounds} &nbsp;|&nbsp; judge: <b>{judge}</b></p>
+        <table>
+          <tr><th>{contender_label}</th><td>{contenders}</td></tr>
+          <tr><th>Objective</th><td>{html.escape(view.objective)}</td></tr>
+        </table>
+      </div>
+      {outcome}
+    """
+    return _page(f"GreyNOC DMZ - Battle {view.status}", body, role=role, head_extra=head_extra)
 
 
 def render_coverage(coverage: CoverageReport, role: Role = Role.admin) -> str:

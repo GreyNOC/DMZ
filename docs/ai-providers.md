@@ -130,10 +130,16 @@ providers (local endpoints need no allowance).
 
 The dashboard can also run battles, at `/live-battle` (engineer/admin role).
 It offers a head-to-head form and a collaborative-team form; each posts to a
-`/run-battle` or `/run-collab` action that runs the battle server-side and
-renders the scoreboard, round log, and judge rationale in the same style. Hosted
-providers require ticking **Allow external endpoints** per run, mirroring the
-CLI's `--allow-external`. The roster status view at `/roster` (and `/api/roster`)
+`/run-battle` or `/run-collab` action that starts the battle in a background
+worker and redirects to a progress page at `/battle?id=...`. That page updates
+itself with a no-JavaScript meta refresh — rounds appear as they complete and a
+long battle never blocks the browser — then settles on the scoreboard, round
+log, and judge rationale (and stops refreshing) when the battle finishes. A
+JSON view of the same job is at `/api/battle?id=...`.
+
+Hosted providers require ticking **Allow external endpoints** per run, mirroring
+the CLI's `--allow-external`; a battle is refused before it starts if a fighter
+or judge is not ready. The roster status view at `/roster` (and `/api/roster`)
 stays read-only and never contacts a provider. Because battles spend tokens and
 reach external services, keep authentication on and do not expose the dashboard
 to the internet.

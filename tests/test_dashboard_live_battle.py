@@ -1,6 +1,7 @@
 import json
 import shutil
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -13,9 +14,18 @@ from conftest import RecordingServer
 
 from greynoc_dmz.access import Role
 from greynoc_dmz.auth import AuthConfig, SessionStore, build_session_cookie
-from greynoc_dmz.dashboard import DashboardHandler
+from greynoc_dmz.battle_jobs import MODE_LIVE, STATUS_RUNNING, BattleJobView
+from greynoc_dmz.dashboard import DashboardHandler, render_battle_progress
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def _openai_reply(content: str) -> str:
@@ -52,6 +62,41 @@ def _post(url: str, fields: list[tuple[str, str]], cookie: str | None = None) ->
             return int(response.status), response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         return int(exc.code), exc.read().decode("utf-8")
+
+
+def _start(url: str, fields: list[tuple[str, str]], cookie: str | None = None) -> tuple[int, str]:
+    """POST without following the redirect; return (status, Location header)."""
+    data = urllib.parse.urlencode(fields).encode("utf-8")
+    headers = {"Cookie": cookie} if cookie else {}
+    request = urllib.request.Request(url, data=data, method="POST", headers=headers)
+    try:
+        with _NO_REDIRECT_OPENER.open(request) as response:
+            return int(response.status), response.headers.get("Location", "")
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), exc.headers.get("Location", "")
+
+
+def _job_id(location: str) -> str:
+    return urllib.parse.parse_qs(urllib.parse.urlparse(location).query)["id"][0]
+
+
+def _get(url: str) -> tuple[int, str]:
+    try:
+        with urllib.request.urlopen(url) as response:
+            return int(response.status), response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), exc.read().decode("utf-8")
+
+
+def _poll_done(base: str, job_id: str, timeout: float = 10.0) -> dict[str, object]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        _status, body = _get(f"{base}/api/battle?id={job_id}")
+        payload: dict[str, object] = json.loads(body)
+        if payload.get("status") in {"done", "error"}:
+            return payload
+        time.sleep(0.05)
+    raise AssertionError("battle did not finish within timeout")
 
 
 @pytest.fixture
@@ -109,16 +154,24 @@ def test_get_live_battle_shows_forms(admin_arena: str) -> None:
     assert "name='fighter'" in body or 'name="fighter"' in body
 
 
-def test_post_run_battle_renders_result(admin_arena: str) -> None:
-    status, body = _post(
+def test_post_run_battle_runs_to_completion(admin_arena: str) -> None:
+    status, location = _start(
         f"{admin_arena}/run-battle",
         [("fighter", "Alpha"), ("fighter", "Beta"), ("judge", "Judge"), ("rounds", "1")],
     )
 
-    assert status == 200
+    assert status == 302
+    job_id = _job_id(location)
+    payload = _poll_done(admin_arena, job_id)
+    assert payload["status"] == "done"
+    result = payload["result"]
+    assert isinstance(result, dict)
+    assert result["winner"] == "Alpha"
+
+    _status, body = _get(f"{admin_arena}/battle?id={job_id}")
     assert "Battle result" in body
-    assert "Not ready" not in body
     assert "Alpha" in body
+    assert 'http-equiv="refresh"' not in body  # finished pages do not auto-refresh
 
 
 def test_post_run_battle_requires_two_fighters(admin_arena: str) -> None:
@@ -130,15 +183,54 @@ def test_post_run_battle_requires_two_fighters(admin_arena: str) -> None:
     assert "at least two" in body
 
 
-def test_post_run_collab_renders_result(admin_arena: str) -> None:
-    status, body = _post(
+def test_post_run_collab_runs_to_completion(admin_arena: str) -> None:
+    status, location = _start(
         f"{admin_arena}/run-collab",
         [("teams", "Red=Alpha;Blue=Beta"), ("judge", "Judge"), ("rounds", "1")],
     )
 
-    assert status == 200
+    assert status == 302
+    job_id = _job_id(location)
+    payload = _poll_done(admin_arena, job_id)
+    assert payload["status"] == "done"
+    result = payload["result"]
+    assert isinstance(result, dict)
+    assert result["winner"] == "Red"
+
+    _status, body = _get(f"{admin_arena}/battle?id={job_id}")
     assert "Collaborative battle result" in body
     assert "Red" in body
+
+
+def test_battle_progress_unknown_id_is_404(admin_arena: str) -> None:
+    status, _body = _get(f"{admin_arena}/battle?id=does-not-exist")
+    assert status == 404
+    api_status, _api = _get(f"{admin_arena}/api/battle?id=does-not-exist")
+    assert api_status == 404
+
+
+def test_progress_page_running_state_auto_refreshes() -> None:
+    # Render a running snapshot directly: it must carry the meta refresh and show
+    # progress, with no final result.
+    view = BattleJobView(
+        id="abc123",
+        mode=MODE_LIVE,
+        label={"fighters": ["Alpha", "Beta"], "judge": "Judge"},
+        objective="obj",
+        total_rounds=3,
+        status=STATUS_RUNNING,
+        rounds_done=1,
+        partial=(),
+        result=None,
+        error="",
+    )
+
+    page = render_battle_progress(view)
+
+    assert 'http-equiv="refresh"' in page
+    assert "Round 1 of 3" in page
+    assert "abc123" in page
+    assert "Battle result" not in page
 
 
 def test_viewer_is_forbidden_from_live_battle(viewer_arena: tuple[str, str]) -> None:

@@ -14,6 +14,7 @@ data and never asked to produce commands for automatic execution.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -358,8 +359,13 @@ def run_live_battle(
     judge: Combatant,
     objective: str = DEFAULT_LIVE_OBJECTIVE,
     rounds: int = 5,
+    on_round: Callable[[JudgedRound], None] | None = None,
 ) -> LiveBattleResult:
-    """Run a real head-to-head battle across rotating SOC challenges."""
+    """Run a real head-to-head battle across rotating SOC challenges.
+
+    ``on_round`` is called with each round as it completes, letting a caller
+    observe progress on a long battle without waiting for the final result.
+    """
     if len(combatants) < 2:
         raise ValueError("a live battle needs at least two combatants")
     names = [combatant.name for combatant in combatants]
@@ -393,6 +399,8 @@ def run_live_battle(
                 rationale=outcome.rationale,
             )
         )
+        if on_round is not None:
+            on_round(judged_rounds[-1])
 
     winner = _winner_from(totals)
     summary = _summary(winner, totals)
@@ -438,11 +446,13 @@ def run_collaborative_battle(
     judge: Combatant,
     objective: str = DEFAULT_COLLAB_OBJECTIVE,
     rounds: int = 3,
+    on_round: Callable[[CollaborativeRound], None] | None = None,
 ) -> CollaborativeBattleResult:
     """Run a collaborative battle: teammates build on each other, teams are judged.
 
     With a single team this is pure collaboration (the team is still scored); with
-    two or more teams the collaborative answers compete head-to-head.
+    two or more teams the collaborative answers compete head-to-head. ``on_round``
+    is called with each round as it completes for progress reporting.
     """
     if not teams:
         raise ValueError("a collaborative battle needs at least one team")
@@ -486,6 +496,8 @@ def run_collaborative_battle(
                 rationale=outcome.rationale,
             )
         )
+        if on_round is not None:
+            on_round(collaborative_rounds[-1])
 
     winner = _winner_from(totals)
     summary = _summary(winner, totals, noun="team")
