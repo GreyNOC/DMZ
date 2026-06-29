@@ -123,10 +123,20 @@ greynoc-dmz collab-battle --teams "Red=Claude,GPT;Blue=Gemini,Local" --judge Cla
 
 Both battle commands accept `--objective`, `--roster <path>`, and `--json`. The
 judge defaults to a roster fighter that is not a combatant. Live and collaborative
-battles make outbound provider calls, so they run from the CLI (never the
-read-only dashboard) and require `--allow-external` for hosted providers. The
-dashboard exposes a read-only roster status view at `/roster` and `/api/roster`
-that reports readiness without contacting any provider.
+battles make outbound provider calls and require `--allow-external` for hosted
+providers (local endpoints need no allowance).
+
+### From the dashboard
+
+The dashboard can also run battles, at `/live-battle` (engineer/admin role).
+It offers a head-to-head form and a collaborative-team form; each posts to a
+`/run-battle` or `/run-collab` action that runs the battle server-side and
+renders the scoreboard, round log, and judge rationale in the same style. Hosted
+providers require ticking **Allow external endpoints** per run, mirroring the
+CLI's `--allow-external`. The roster status view at `/roster` (and `/api/roster`)
+stays read-only and never contacts a provider. Because battles spend tokens and
+reach external services, keep authentication on and do not expose the dashboard
+to the internet.
 
 ## Safety model
 

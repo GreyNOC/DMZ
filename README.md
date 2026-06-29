@@ -213,11 +213,13 @@ greynoc-dmz live-battle --fighters Claude,GPT --judge Gemini --rounds 5 --allow-
 greynoc-dmz collab-battle --teams "Red=Claude,GPT;Blue=Gemini" --judge Claude --allow-external
 ```
 
-Live and collaborative battles make outbound provider calls, so they run from the
-CLI and require `--allow-external` for hosted endpoints (local endpoints need no
-allowance). The dashboard shows a read-only roster status at `/roster` but never
-contacts a provider. See `docs/ai-providers.md` for the full roster format,
-provider configuration, and safety model.
+Live and collaborative battles make outbound provider calls and require
+`--allow-external` for hosted endpoints (local endpoints need no allowance). They
+can be run from the CLI or from the dashboard at `/live-battle` (engineer/admin
+role), which renders the scoreboard, round log, and judge rationale in the
+classic system-manager style. The read-only `/roster` status view never contacts
+a provider. See `docs/ai-providers.md` for the full roster format, provider
+configuration, and safety model.
 
 ## MITRE ATT&CK coverage
 
@@ -362,7 +364,7 @@ The role model defines `viewer`, `analyst`, `engineer`, and `admin` in
 enforces the permission map per route:
 
 - `viewer` and `analyst` see scenario status and detail (`/`, `/scenario`, `/api/status`)
-- `engineer` and `admin` additionally reach the detection tooling (`/coverage`, `/ai-battle` and their APIs)
+- `engineer` and `admin` additionally reach the detection tooling and AI arena (`/coverage`, `/ai-battle`, `/roster`, `/live-battle` and their APIs/actions)
 
 Routes a role lacks permission for return `403`. When authentication is
 disabled for local development, requests run with the `admin` role.

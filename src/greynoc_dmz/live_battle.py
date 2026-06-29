@@ -45,6 +45,9 @@ _SCORE_MIN = 0
 _SCORE_MAX = 10
 _FALLBACK_SCORE = 5
 
+DEFAULT_LIVE_OBJECTIVE = "Establish operational dominance in a synthetic SOC exercise."
+DEFAULT_COLLAB_OBJECTIVE = "Produce the strongest joint response in a synthetic SOC exercise."
+
 
 @dataclass(frozen=True)
 class Combatant:
@@ -353,7 +356,7 @@ def _accumulate(totals: dict[str, int], scores: dict[str, int]) -> None:
 def run_live_battle(
     combatants: list[Combatant],
     judge: Combatant,
-    objective: str = "Establish operational dominance in a synthetic SOC exercise.",
+    objective: str = DEFAULT_LIVE_OBJECTIVE,
     rounds: int = 5,
 ) -> LiveBattleResult:
     """Run a real head-to-head battle across rotating SOC challenges."""
@@ -433,7 +436,7 @@ def _collaborate(
 def run_collaborative_battle(
     teams: list[Team],
     judge: Combatant,
-    objective: str = "Produce the strongest joint response in a synthetic SOC exercise.",
+    objective: str = DEFAULT_COLLAB_OBJECTIVE,
     rounds: int = 3,
 ) -> CollaborativeBattleResult:
     """Run a collaborative battle: teammates build on each other, teams are judged.

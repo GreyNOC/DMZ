@@ -14,10 +14,8 @@ from .ai import (
     AIProviderError,
     AIReadinessStatus,
     Fighter,
-    build_fighter_provider,
     check_ai_readiness,
     check_fighter_readiness,
-    find_fighter,
     load_ai_config,
     load_roster,
     run_live_check,
@@ -25,6 +23,15 @@ from .ai import (
 )
 from .ai.roster import ROSTER_RELATIVE_PATH
 from .ai_battle import simulate_battle
+from .arena import (
+    ArenaError,
+    parse_teams,
+    resolve_judge,
+    select_fighters,
+    to_combatant,
+    to_team,
+    unready_fighters,
+)
 from .config import load_lab_config
 from .coverage import coverage_for_root
 from .dashboard import serve
@@ -38,8 +45,8 @@ from .integrations import (
 )
 from .lint import has_errors, lint_repo
 from .live_battle import (
-    Combatant,
-    Team,
+    DEFAULT_COLLAB_OBJECTIVE,
+    DEFAULT_LIVE_OBJECTIVE,
     run_collaborative_battle,
     run_live_battle,
 )
@@ -375,10 +382,6 @@ def ai_review_cmd() -> None:
     console.print(review.text, markup=False)
 
 
-_LIVE_OBJECTIVE = "Establish operational dominance in a synthetic SOC exercise."
-_COLLAB_OBJECTIVE = "Produce the strongest joint response in a synthetic SOC exercise."
-
-
 def _roster_path(roster: Path | None) -> Path:
     return roster if roster is not None else _root() / ROSTER_RELATIVE_PATH
 
@@ -396,42 +399,21 @@ def _load_roster_or_exit(roster: Path | None) -> tuple[Path, list[Fighter]]:
 def _select_fighters(roster: list[Fighter], names_csv: str) -> list[Fighter]:
     if not names_csv.strip():
         return roster[:2]
-    selected: list[Fighter] = []
-    seen: set[str] = set()
-    for raw in names_csv.split(","):
-        name = raw.strip()
-        if not name:
-            continue
-        key = name.lower()
-        if key in seen:
-            raise typer.BadParameter(f"duplicate fighter '{name}'")
-        seen.add(key)
-        fighter = find_fighter(roster, name)
-        if fighter is None:
-            raise typer.BadParameter(f"unknown fighter '{name}'")
-        selected.append(fighter)
-    return selected
+    try:
+        return select_fighters(roster, names_csv.split(","))
+    except ArenaError as error:
+        raise typer.BadParameter(str(error)) from error
 
 
 def _resolve_judge(roster: list[Fighter], combatants: list[Fighter], judge_name: str) -> Fighter:
-    if judge_name.strip():
-        fighter = find_fighter(roster, judge_name)
-        if fighter is None:
-            raise typer.BadParameter(f"unknown judge '{judge_name}'")
-        return fighter
-    combatant_names = {fighter.name.lower() for fighter in combatants}
-    for fighter in roster:
-        if fighter.name.lower() not in combatant_names:
-            return fighter
-    return combatants[0]
+    try:
+        return resolve_judge(roster, combatants, judge_name)
+    except ArenaError as error:
+        raise typer.BadParameter(str(error)) from error
 
 
 def _require_ready(fighters: list[Fighter], allow_external: bool) -> None:
-    not_ready = []
-    for fighter in fighters:
-        readiness = check_fighter_readiness(fighter, allow_external)
-        if readiness.status is not AIReadinessStatus.ready:
-            not_ready.append((fighter.name, readiness.detail))
+    not_ready = unready_fighters(fighters, allow_external)
     if not_ready:
         for name, detail in not_ready:
             console.print(f"not ready: {name} - {detail}")
@@ -484,7 +466,7 @@ def live_battle_cmd(
     ] = "",
     judge: Annotated[str, typer.Option("--judge", help="Fighter name to score the battle")] = "",
     rounds: Annotated[int, typer.Option("--rounds", min=1, max=24)] = 5,
-    objective: Annotated[str, typer.Option("--objective")] = _LIVE_OBJECTIVE,
+    objective: Annotated[str, typer.Option("--objective")] = DEFAULT_LIVE_OBJECTIVE,
     roster: Annotated[Path | None, typer.Option("--roster", help="Roster JSON path")] = None,
     allow_external: Annotated[
         bool, typer.Option("--allow-external", help="Permit external AI endpoints")
@@ -499,13 +481,8 @@ def live_battle_cmd(
     judge_fighter = _resolve_judge(all_fighters, selected, judge)
     _require_ready([*selected, judge_fighter], allow_external)
 
-    combatants = [
-        Combatant(fighter.name, build_fighter_provider(fighter, allow_external))
-        for fighter in selected
-    ]
-    judge_combatant = Combatant(
-        judge_fighter.name, build_fighter_provider(judge_fighter, allow_external)
-    )
+    combatants = [to_combatant(fighter, allow_external) for fighter in selected]
+    judge_combatant = to_combatant(judge_fighter, allow_external)
     result = run_live_battle(combatants, judge_combatant, objective, rounds)
 
     if as_json:
@@ -542,7 +519,7 @@ def collab_battle_cmd(
     ],
     judge: Annotated[str, typer.Option("--judge", help="Fighter name to score the teams")] = "",
     rounds: Annotated[int, typer.Option("--rounds", min=1, max=24)] = 3,
-    objective: Annotated[str, typer.Option("--objective")] = _COLLAB_OBJECTIVE,
+    objective: Annotated[str, typer.Option("--objective")] = DEFAULT_COLLAB_OBJECTIVE,
     roster: Annotated[Path | None, typer.Option("--roster", help="Roster JSON path")] = None,
     allow_external: Annotated[
         bool, typer.Option("--allow-external", help="Permit external AI endpoints")
@@ -556,18 +533,9 @@ def collab_battle_cmd(
     _require_ready([*members, judge_fighter], allow_external)
 
     battle_teams = [
-        Team(
-            name,
-            [
-                Combatant(fighter.name, build_fighter_provider(fighter, allow_external))
-                for fighter in roster_members
-            ],
-        )
-        for name, roster_members in parsed_teams
+        to_team(name, roster_members, allow_external) for name, roster_members in parsed_teams
     ]
-    judge_combatant = Combatant(
-        judge_fighter.name, build_fighter_provider(judge_fighter, allow_external)
-    )
+    judge_combatant = to_combatant(judge_fighter, allow_external)
     result = run_collaborative_battle(battle_teams, judge_combatant, objective, rounds)
 
     if as_json:
@@ -595,36 +563,10 @@ def collab_battle_cmd(
 
 
 def _parse_teams(spec: str, roster: list[Fighter]) -> list[tuple[str, list[Fighter]]]:
-    teams: list[tuple[str, list[Fighter]]] = []
-    seen_teams: set[str] = set()
-    for chunk in spec.split(";"):
-        entry = chunk.strip()
-        if not entry:
-            continue
-        if "=" not in entry:
-            raise typer.BadParameter(f"team '{entry}' must be NAME=member,member")
-        name, members_csv = entry.split("=", 1)
-        team_name = name.strip()
-        if not team_name:
-            raise typer.BadParameter("team name must not be empty")
-        if team_name.lower() in seen_teams:
-            raise typer.BadParameter(f"duplicate team '{team_name}'")
-        seen_teams.add(team_name.lower())
-        members: list[Fighter] = []
-        for raw in members_csv.split(","):
-            member_name = raw.strip()
-            if not member_name:
-                continue
-            fighter = find_fighter(roster, member_name)
-            if fighter is None:
-                raise typer.BadParameter(f"unknown fighter '{member_name}'")
-            members.append(fighter)
-        if not members:
-            raise typer.BadParameter(f"team '{team_name}' has no members")
-        teams.append((team_name, members))
-    if not teams:
-        raise typer.BadParameter("no teams provided")
-    return teams
+    try:
+        return parse_teams(spec, roster)
+    except ArenaError as error:
+        raise typer.BadParameter(str(error)) from error
 
 
 @app.command("export-dataset")

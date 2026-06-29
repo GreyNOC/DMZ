@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .access import Role, can
 from .ai import (
+    AIProviderError,
     AIReadiness,
     Fighter,
     check_ai_readiness,
@@ -17,6 +18,15 @@ from .ai import (
 )
 from .ai.roster import ROSTER_RELATIVE_PATH
 from .ai_battle import BattleResult, simulate_battle
+from .arena import (
+    ArenaError,
+    parse_teams,
+    resolve_judge,
+    select_fighters,
+    to_combatant,
+    to_team,
+    unready_fighters,
+)
 from .auth import (
     AuthConfig,
     SessionStore,
@@ -31,6 +41,14 @@ from .correlation import correlate
 from .coverage import CoverageReport, coverage_for_root
 from .engine import validate_all
 from .integrations import IntegrationCheck, check_integration_config, load_integrations
+from .live_battle import (
+    DEFAULT_COLLAB_OBJECTIVE,
+    DEFAULT_LIVE_OBJECTIVE,
+    CollaborativeBattleResult,
+    LiveBattleResult,
+    run_collaborative_battle,
+    run_live_battle,
+)
 from .models import ScenarioResult
 from .reporting import write_report
 from .store import read_history
@@ -49,6 +67,9 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     "/api/ai-battle": "rule:test",
     "/roster": "rule:test",
     "/api/roster": "rule:test",
+    "/live-battle": "rule:test",
+    "/run-battle": "rule:test",
+    "/run-collab": "rule:test",
     "/validate": "scenario:run",
 }
 
@@ -148,6 +169,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+        if parsed.path == "/live-battle":
+            role = self._effective_role()
+            if role is None:
+                self.send_error(403, "insufficient role")
+                return
+            self._send_html(render_live_battle_page(_roster_status(self.root), role))
+            return
         if parsed.path == "/api/status":
             results = validate_all(self.root, persist=False)
             integration_checks = [
@@ -200,6 +228,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 write_report(result, self.root / config.report_dir)
             self._redirect("/")
             return
+        if parsed.path in {"/run-battle", "/run-collab"}:
+            if not self._is_authorized():
+                self._redirect("/login")
+                return
+            if not self._has_permission("rule:test"):
+                self.send_error(403, "insufficient role")
+                return
+            role = self._effective_role()
+            if role is None:
+                self.send_error(403, "insufficient role")
+                return
+            form = self._read_form()
+            if parsed.path == "/run-battle":
+                self._send_html(_run_live_from_form(self.root, form, role))
+            else:
+                self._send_html(_run_collab_from_form(self.root, form, role))
+            return
         if parsed.path != "/login":
             self.send_error(404)
             return
@@ -233,6 +278,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _has_permission(self, permission: str) -> bool:
         role = self._effective_role()
         return role is not None and can(role, permission)
+
+    def _read_form(self) -> dict[str, list[str]]:
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8")
+        return parse_qs(body)
 
     def _redirect(
         self, location: str, cookie: str | None = None, clear_cookie: bool = False
@@ -313,6 +363,8 @@ def _menu(role: Role | None) -> str:
         items.append('<a href="/ai-battle">AI Battle</a>')
     if can(role, "rule:test"):
         items.append('<a href="/roster">AI Roster</a>')
+    if can(role, "rule:test"):
+        items.append('<a href="/live-battle">Live Battle</a>')
     if can(role, "dashboard:read"):
         items.append('<a href="/api/status">API</a>')
     items.append('<a href="/logout">Logout</a>')
@@ -690,9 +742,7 @@ def render_ai_battle(result: BattleResult, role: Role = Role.admin) -> str:
     return _page("GreyNOC DMZ - AI Battle", body, role=role)
 
 
-def render_roster(
-    statuses: list[tuple[Fighter, AIReadiness]], role: Role = Role.admin
-) -> str:
+def _roster_table(statuses: list[tuple[Fighter, AIReadiness]]) -> str:
     rows = []
     for fighter, readiness in statuses:
         status_class = "pass" if readiness.status.value == "ready" else "fail"
@@ -707,23 +757,271 @@ def render_roster(
             f"<td>{html.escape(readiness.detail)}</td>"
             "</tr>"
         )
+    empty = '<tr><td colspan="7">No fighters configured. Add them to configs/ai-roster.json.</td></tr>'
+    return (
+        "<table>"
+        "<thead><tr><th>Name</th><th>Provider</th><th>Model</th><th>Key env</th>"
+        "<th>Endpoint</th><th>Status</th><th>Detail</th></tr></thead>"
+        f"<tbody>{''.join(rows) or empty}</tbody></table>"
+    )
 
+
+def render_roster(
+    statuses: list[tuple[Fighter, AIReadiness]], role: Role = Role.admin
+) -> str:
     body = f"""
       <div class="panel">
         <h3>AI battle roster</h3>
         <p>Fighters that can be fielded in a live or collaborative battle. API keys
         are referenced only by environment-variable name and are read at call time.
-        Live battles run from the CLI (<code>greynoc-dmz live-battle</code>,
-        <code>greynoc-dmz collab-battle</code>) because they make outbound provider
-        calls; this view never contacts a provider.</p>
-        <table>
-          <thead><tr><th>Name</th><th>Provider</th><th>Model</th><th>Key env</th><th>Endpoint</th><th>Status</th><th>Detail</th></tr></thead>
-          <tbody>{''.join(rows) or '<tr><td colspan="7">No fighters configured. Add them to configs/ai-roster.json.</td></tr>'}</tbody>
-        </table>
+        This status view never contacts a provider; run battles from
+        <a href="/live-battle">Live Battle</a> or the CLI.</p>
+        {_roster_table(statuses)}
       </div>
-      <div class="panel">JSON API: <code>/api/roster</code>. External endpoints show as blocked until a battle is run with <code>--allow-external</code>.</div>
+      <div class="panel">JSON API: <code>/api/roster</code>. External endpoints show as blocked until a battle is run with external endpoints allowed.</div>
     """
     return _page("GreyNOC DMZ - AI Roster", body, role=role)
+
+
+def _short(text: str, limit: int = 400) -> str:
+    clean = " ".join(text.split())
+    return clean if len(clean) <= limit else clean[: limit - 1] + "…"
+
+
+def _form_int(form: dict[str, list[str]], key: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(form.get(key, [str(default)])[0])
+    except ValueError:
+        return default
+    return max(low, min(high, value))
+
+
+def _judge_select(names: list[str]) -> str:
+    options = ['<option value="">(auto: a non-competing fighter)</option>']
+    options.extend(f"<option value='{html.escape(n)}'>{html.escape(n)}</option>" for n in names)
+    return f"<select name='judge'>{''.join(options)}</select>"
+
+
+def _fighter_checkboxes(names: list[str]) -> str:
+    if not names:
+        return "<i>No fighters configured. Add them to configs/ai-roster.json.</i>"
+    boxes = [
+        "<label style='display:inline-block;margin-right:14px'>"
+        f"<input type='checkbox' name='fighter' value='{html.escape(n)}'> {html.escape(n)}</label>"
+        for n in names
+    ]
+    return "".join(boxes)
+
+
+def render_live_battle_page(
+    statuses: list[tuple[Fighter, AIReadiness]],
+    role: Role = Role.admin,
+    *,
+    result_html: str = "",
+    error: str = "",
+) -> str:
+    names = [fighter.name for fighter, _ in statuses]
+    judge = _judge_select(names)
+    error_html = f"<div class='panel'><p class='error'>{html.escape(error)}</p></div>" if error else ""
+
+    body = f"""
+      <div class="panel">
+        <h3>Live AI battle arena</h3>
+        <p>Pit real AI models against each other. Each model answers synthetic SOC
+        challenges and a judge model scores them. Battles call external AI providers
+        and may take up to a minute. Tick <b>Allow external endpoints</b> for hosted
+        providers (local endpoints need no allowance). Do not expose this dashboard
+        to the internet.</p>
+      </div>
+      {error_html}
+      {result_html}
+      <div class="panel">
+        <h3>Head-to-head battle</h3>
+        <form method="post" action="/run-battle">
+          <p><b>Fighters</b> (pick at least two)<br>{_fighter_checkboxes(names)}</p>
+          <div class="battle-form">
+            <label>Judge<br>{judge}</label>
+            <label>Rounds<br><input type="number" name="rounds" value="3" min="1" max="10"></label>
+            <label>Allow external endpoints<br><input type="checkbox" name="allow_external" value="1"></label>
+          </div>
+          <label>Objective<br><input name="objective" value="{html.escape(DEFAULT_LIVE_OBJECTIVE)}"></label>
+          <p><button type="submit">Run battle</button></p>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>Collaborative team battle</h3>
+        <form method="post" action="/run-collab">
+          <label>Teams<br><input name="teams" placeholder="Red=Alpha,Beta;Blue=Gamma" value=""></label>
+          <div class="battle-form">
+            <label>Judge<br>{judge}</label>
+            <label>Rounds<br><input type="number" name="rounds" value="3" min="1" max="10"></label>
+            <label>Allow external endpoints<br><input type="checkbox" name="allow_external" value="1"></label>
+          </div>
+          <label>Objective<br><input name="objective" value="{html.escape(DEFAULT_COLLAB_OBJECTIVE)}"></label>
+          <p><button type="submit">Run collaborative battle</button></p>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>Roster</h3>
+        {_roster_table(statuses)}
+      </div>
+    """
+    return _page("GreyNOC DMZ - Live Battle", body, role=role)
+
+
+def _scoreboard(totals: dict[str, int], label: str) -> str:
+    rows = [
+        f"<tr><td>{html.escape(name)}</td><td align='right'>{total}</td></tr>"
+        for name, total in sorted(totals.items(), key=lambda item: item[1], reverse=True)
+    ]
+    return (
+        "<table><thead><tr>"
+        f"<th>{html.escape(label)}</th><th>Total</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _live_battle_result_html(result: LiveBattleResult) -> str:
+    round_rows = []
+    for battle_round in result.rounds:
+        responses = []
+        for response in battle_round.responses:
+            score = battle_round.scores.get(response.fighter, 0)
+            shown = (
+                f"({html.escape(response.error)})"
+                if response.error
+                else html.escape(_short(response.text))
+            )
+            responses.append(f"<div><b>{html.escape(response.fighter)}</b> [{score}]: {shown}</div>")
+        round_rows.append(
+            "<tr>"
+            f"<td>{battle_round.round_number}</td>"
+            f"<td>{html.escape(battle_round.focus)}</td>"
+            f"<td>{''.join(responses)}</td>"
+            f"<td><span class='status win'>{html.escape(battle_round.winner)}</span><br>"
+            f"{html.escape(battle_round.rationale)}</td>"
+            "</tr>"
+        )
+    return f"""
+      <div class="panel">
+        <h3>Battle result</h3>
+        <div class="grid">
+          <div class="metric">Winner<b>{html.escape(result.winner)}</b></div>
+          <div class="metric">Judge<b>{html.escape(result.judge)}</b></div>
+          <div class="metric">Rounds<b>{len(result.rounds)}</b></div>
+          <div class="metric">Fighters<b>{len(result.fighters)}</b></div>
+        </div>
+        <p>{html.escape(result.summary)}</p>
+        {_scoreboard(result.totals, "Fighter")}
+      </div>
+      <div class="panel">
+        <h3>Round log</h3>
+        <table>
+          <thead><tr><th>Round</th><th>Challenge</th><th>Responses</th><th>Winner</th></tr></thead>
+          <tbody>{''.join(round_rows)}</tbody>
+        </table>
+      </div>
+    """
+
+
+def _collab_result_html(result: CollaborativeBattleResult) -> str:
+    team_lines = "".join(
+        f"<div><b>{html.escape(name)}</b>: {html.escape(', '.join(members))}</div>"
+        for name, members in result.teams.items()
+    )
+    round_rows = []
+    for battle_round in result.rounds:
+        answers = []
+        for team_name, answer in battle_round.team_answers.items():
+            score = battle_round.scores.get(team_name, 0)
+            answers.append(
+                f"<div><b>{html.escape(team_name)}</b> [{score}]: {html.escape(_short(answer))}</div>"
+            )
+        round_rows.append(
+            "<tr>"
+            f"<td>{battle_round.round_number}</td>"
+            f"<td>{html.escape(battle_round.focus)}</td>"
+            f"<td>{''.join(answers)}</td>"
+            f"<td><span class='status win'>{html.escape(battle_round.winner)}</span><br>"
+            f"{html.escape(battle_round.rationale)}</td>"
+            "</tr>"
+        )
+    return f"""
+      <div class="panel">
+        <h3>Collaborative battle result</h3>
+        <div class="grid">
+          <div class="metric">Winner<b>{html.escape(result.winner)}</b></div>
+          <div class="metric">Judge<b>{html.escape(result.judge)}</b></div>
+          <div class="metric">Rounds<b>{len(result.rounds)}</b></div>
+          <div class="metric">Teams<b>{len(result.teams)}</b></div>
+        </div>
+        <p>{html.escape(result.summary)}</p>
+        {team_lines}
+        {_scoreboard(result.totals, "Team")}
+      </div>
+      <div class="panel">
+        <h3>Round log</h3>
+        <table>
+          <thead><tr><th>Round</th><th>Challenge</th><th>Team answers</th><th>Winner</th></tr></thead>
+          <tbody>{''.join(round_rows)}</tbody>
+        </table>
+      </div>
+    """
+
+
+def _run_live_from_form(root: Path, form: dict[str, list[str]], role: Role) -> str:
+    statuses = _roster_status(root)
+    roster = [fighter for fighter, _ in statuses]
+    allow_external = bool(form.get("allow_external"))
+    rounds = _form_int(form, "rounds", 3, 1, 10)
+    objective = form.get("objective", [""])[0].strip() or DEFAULT_LIVE_OBJECTIVE
+    judge_name = form.get("judge", [""])[0]
+    try:
+        selected = select_fighters(roster, form.get("fighter", []))
+        if len(selected) < 2:
+            raise ArenaError("select at least two fighters")
+        judge_fighter = resolve_judge(roster, selected, judge_name)
+        not_ready = unready_fighters([*selected, judge_fighter], allow_external)
+        if not_ready:
+            return render_live_battle_page(statuses, role, error=_not_ready_message(not_ready, allow_external))
+        combatants = [to_combatant(fighter, allow_external) for fighter in selected]
+        judge = to_combatant(judge_fighter, allow_external)
+        result = run_live_battle(combatants, judge, objective, rounds)
+    except ValueError as error:
+        return render_live_battle_page(statuses, role, error=str(error))
+    except AIProviderError as error:
+        return render_live_battle_page(statuses, role, error=f"battle failed: {error}")
+    return render_live_battle_page(statuses, role, result_html=_live_battle_result_html(result))
+
+
+def _run_collab_from_form(root: Path, form: dict[str, list[str]], role: Role) -> str:
+    statuses = _roster_status(root)
+    roster = [fighter for fighter, _ in statuses]
+    allow_external = bool(form.get("allow_external"))
+    rounds = _form_int(form, "rounds", 3, 1, 10)
+    objective = form.get("objective", [""])[0].strip() or DEFAULT_COLLAB_OBJECTIVE
+    judge_name = form.get("judge", [""])[0]
+    try:
+        parsed = parse_teams(form.get("teams", [""])[0], roster)
+        members = [fighter for _name, team_members in parsed for fighter in team_members]
+        judge_fighter = resolve_judge(roster, members, judge_name)
+        not_ready = unready_fighters([*members, judge_fighter], allow_external)
+        if not_ready:
+            return render_live_battle_page(statuses, role, error=_not_ready_message(not_ready, allow_external))
+        battle_teams = [to_team(name, team_members, allow_external) for name, team_members in parsed]
+        judge = to_combatant(judge_fighter, allow_external)
+        result = run_collaborative_battle(battle_teams, judge, objective, rounds)
+    except ValueError as error:
+        return render_live_battle_page(statuses, role, error=str(error))
+    except AIProviderError as error:
+        return render_live_battle_page(statuses, role, error=f"battle failed: {error}")
+    return render_live_battle_page(statuses, role, result_html=_collab_result_html(result))
+
+
+def _not_ready_message(not_ready: list[tuple[str, str]], allow_external: bool) -> str:
+    detail = "; ".join(f"{name} ({reason})" for name, reason in not_ready)
+    hint = "" if allow_external else " Tick 'Allow external endpoints' for hosted providers."
+    return f"Not ready: {detail}.{hint}"
 
 
 def render_coverage(coverage: CoverageReport, role: Role = Role.admin) -> str:
